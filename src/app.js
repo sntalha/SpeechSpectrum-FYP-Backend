@@ -2,6 +2,7 @@ import express from 'express';
 import Constants from './constant.js';
 import connectDB from './db/db.connect.js';
 import userRoutes from './routes/user.routes.js'
+import categoryRoutes from './routes/category.routes.js';
 
 const app = express();
 app.use(express.json());
@@ -12,6 +13,7 @@ app.get('/', (req, res) => {
 });
 
 app.use('/api/user',userRoutes);
+app.use('/api/category',categoryRoutes);
 
 app.listen(Constants.PORT, () => {
   console.log(`Server is running on http://localhost:${Constants.PORT}`);
