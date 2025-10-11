@@ -1,11 +1,8 @@
-import mongoose from "mongoose";
+import { createClient } from '@supabase/supabase-js'
+import Constants from '../constant.js'
 
-export default async function connectDB() {
-    try {
-        await mongoose.connect(process.env.MONGO_URI);
-        console.log("MongoDB connected successfully");
-    } catch (error) {
-        console.error("MongoDB connection failed:", error);
-        process.exit(1); // Exit the process with failure
-    }
-}
+const supabaseUrl = Constants.SUPABASE_URL
+const supabaseKey = Constants.SUPABASE_API_KEY
+const supabase = createClient(supabaseUrl, supabaseKey)
+
+export default supabase
