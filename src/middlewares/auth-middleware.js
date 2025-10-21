@@ -1,33 +1,22 @@
-// import jwt from "jsonwebtoken";
-// import Constants from "../constant.js";
-// import { userModel } from "../models/user.schema.js";
+import supabase from '../db/db.connect.js';
 
-// const authMiddleware = async (req, res, next) => {
-//   const token = req.headers.authorization?.split(" ")[1];
-  
-//   if (!token) {
-//     return res.status(401).json({ message: "Unauthorized" });
-//   }
-//   try {
-//     const decode = jwt.verify(token,Constants.JWT_SECRET)
-//     const user = await userModel.findById(decode?.id).select("-password")
-//     if (!user) {
-//       return res.status(401).json({ message: "User not found by token" });
-//     }
-//     req.user = user;
-//     next();
-//   } catch (error) {
-//     res
-//       .status(500)
-//       .json({ message: "Internal Server Error", error: error.message });
-//   }
-// };
+export const verifyToken = async (req, res, next) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ message: 'No token provided', status: false });
+        }
 
-// const checkAdmin = async (req, res, next) => {
-//   if (req.user.role !== "admin") {
-//     return res.status(403).json({ message: "Access denied" });
-//   }
-//   next();
-// }
+        const { data: { user }, error } = await supabase.auth.getUser(token);
+        
+        if (error || !user) {
+            return res.status(401).json({ message: 'Invalid or expired token', status: false });
+        }
 
-// export {authMiddleware,checkAdmin}
+        // Attach the user to the request object
+        req.user = user;
+        next();
+    } catch (error) {
+        return res.status(500).json({ message: 'Error verifying token', error: error.message });
+    }
+};
