@@ -11,7 +11,6 @@ router.use(verifyToken);
 router.post('/', QuestionnaireSubmission.createSubmission);
 router.get('/', QuestionnaireSubmission.getSubmissions);
 router.get('/:submission_id', QuestionnaireSubmission.getSubmission);
-router.put('/:submission_id', QuestionnaireSubmission.updateSubmission);
 router.delete('/:submission_id', QuestionnaireSubmission.deleteSubmission);
 
 export default router;

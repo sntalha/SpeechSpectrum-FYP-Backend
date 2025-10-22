@@ -32,6 +32,25 @@ CREATE TABLE IF NOT EXISTS questionnaire_submissions (
     submitted_at TIMESTAMP DEFAULT now()
 );
 
+-- QUESTIONNAIRE RESULTS TABLE
+CREATE TABLE IF NOT EXISTS questionnaire_results (
+    q_result_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- Foreign keys
+    submission_id UUID REFERENCES questionnaire_submissions(submission_id) ON DELETE CASCADE,
+    parent_id UUID REFERENCES parents(parent_id) ON DELETE CASCADE,
+    child_id UUID REFERENCES children(child_id) ON DELETE CASCADE,
+
+    -- Model info
+    model_name VARCHAR(50) DEFAULT 'xgboost',
+
+    -- The prediction result stored as JSON
+    result JSONB NOT NULL, 
+
+    -- Timestamp
+    generated_at TIMESTAMP DEFAULT now()
+);
+
 -- ==============================================
 -- INDEXES FOR PERFORMANCE
 -- ==============================================

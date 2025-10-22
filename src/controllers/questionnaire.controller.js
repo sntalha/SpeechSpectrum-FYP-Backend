@@ -28,7 +28,8 @@ export default class QuestionnaireSubmission {
                 });
             }
 
-            const { data, error } = await supabase
+            // Insert submission as before
+            const { data: submissionData, error: submissionError } = await supabase
                 .from('questionnaire_submissions')
                 .insert([
                     { parent_id, child_id, responses }
@@ -36,17 +37,91 @@ export default class QuestionnaireSubmission {
                 .select()
                 .single();
 
-            if (error) {
+            if (submissionError) {
                 return res.status(400).json({
                     message: "Error creating submission",
-                    error: error.message,
+                    error: submissionError.message,
                     status: false
                 });
             }
 
+            // Prepare payload for prediction endpoint. We assume `responses` contains keys expected by the predictor
+            // (A1..A10, Age_Mons, Sex, Family_mem_with_ASD, Jaundice). If not present, prediction will still be attempted
+            // with whatever is available.
+            const predictPayload = {
+                A1: responses?.A1 ?? responses?.a1 ?? null,
+                A2: responses?.A2 ?? responses?.a2 ?? null,
+                A3: responses?.A3 ?? responses?.a3 ?? null,
+                A4: responses?.A4 ?? responses?.a4 ?? null,
+                A5: responses?.A5 ?? responses?.a5 ?? null,
+                A6: responses?.A6 ?? responses?.a6 ?? null,
+                A7: responses?.A7 ?? responses?.a7 ?? null,
+                A8: responses?.A8 ?? responses?.a8 ?? null,
+                A9: responses?.A9 ?? responses?.a9 ?? null,
+                A10: responses?.A10 ?? responses?.a10 ?? null,
+                Age_Mons: responses?.Age_Mons ?? responses?.age_mons ?? responses?.ageMonths ?? null,
+                Sex: responses?.Sex ?? responses?.sex ?? null,
+                Family_mem_with_ASD: responses?.Family_mem_with_ASD ?? responses?.family_mem_with_ASD ?? null,
+                Jaundice: responses?.Jaundice ?? responses?.jaundice ?? null
+            };
+
+            let resultRecord = null;
+
+            try {
+                // Call local prediction service. Assumption: Node runtime provides global fetch (Node 18+).
+                const resp = await fetch('http://127.0.0.1:5000/predict', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(predictPayload)
+                });
+
+                if (!resp.ok) throw new Error(`Prediction service returned ${resp.status}`);
+
+                const prediction = await resp.json();
+
+                // Store prediction result in questionnaire_results table
+                const { data: resultData, error: resultError } = await supabase
+                    .from('questionnaire_results')
+                    .insert([
+                        {
+                            submission_id: submissionData.submission_id,
+                            parent_id,
+                            child_id,
+                            result: prediction
+                        }
+                    ])
+                    .select()
+                    .single();
+
+                if (resultError) {
+                    // Prediction succeeded but storing failed. Return submission with a note.
+                    return res.status(201).json({
+                        message: "Submission created but failed to store prediction result",
+                        submission: submissionData,
+                        result: null,
+                        error: resultError.message,
+                        status: false
+                    });
+                }
+
+                resultRecord = resultData;
+
+            } catch (predErr) {
+                // If prediction failed, still return the submission but notify the client
+                return res.status(201).json({
+                    message: "Submission created but prediction failed",
+                    submission: submissionData,
+                    result: null,
+                    error: predErr.message,
+                    status: true
+                });
+            }
+
+            // Success: return both submission and result
             res.status(201).json({
-                message: "Questionnaire submitted successfully",
-                data,
+                message: "Questionnaire submitted and prediction stored successfully",
+                submission: submissionData,
+                result: resultRecord,
                 status: true
             });
 
@@ -66,7 +141,8 @@ export default class QuestionnaireSubmission {
 
             let query = supabase
                 .from('questionnaire_submissions')
-                .select('*, children(child_name)')
+                // Select submission fields and include child name and linked results
+                .select('*, children(child_name), questionnaire_results(*)')
                 .eq('parent_id', parent_id);
 
             if (child_id) {
@@ -105,7 +181,7 @@ export default class QuestionnaireSubmission {
 
             const { data, error } = await supabase
                 .from('questionnaire_submissions')
-                .select('*, children(child_name)')
+                .select('*, children(child_name), questionnaire_results(*)')
                 .eq('submission_id', submission_id)
                 .eq('parent_id', parent_id)
                 .single();
@@ -134,50 +210,6 @@ export default class QuestionnaireSubmission {
         } catch (error) {
             res.status(500).json({
                 message: "Error fetching submission",
-                error: error.message,
-                status: false
-            });
-        }
-    }
-
-    static async updateSubmission(req, res) {
-        try {
-            const { submission_id } = req.params;
-            const parent_id = req.user.id;
-            const { responses } = req.body;
-
-            if (!responses) {
-                return res.status(400).json({
-                    message: "Responses are required for update",
-                    status: false
-                });
-            }
-
-            const { data, error } = await supabase
-                .from('questionnaire_submissions')
-                .update({ responses })
-                .eq('submission_id', submission_id)
-                .eq('parent_id', parent_id)
-                .select()
-                .single();
-
-            if (error) {
-                return res.status(400).json({
-                    message: "Error updating submission",
-                    error: error.message,
-                    status: false
-                });
-            }
-
-            res.status(200).json({
-                message: "Submission updated successfully",
-                data,
-                status: true
-            });
-
-        } catch (error) {
-            res.status(500).json({
-                message: "Error updating submission",
                 error: error.message,
                 status: false
             });
