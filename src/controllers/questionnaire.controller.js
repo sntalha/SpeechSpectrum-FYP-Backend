@@ -4,7 +4,7 @@ export default class QuestionnaireSubmission {
     static async createSubmission(req, res) {
         try {
             const { child_id, responses } = req.body;
-            const parent_id = req.user.id;
+            const parent_user_id = req.user.id;
 
             if (!child_id || !responses) {
                 return res.status(400).json({
@@ -18,7 +18,7 @@ export default class QuestionnaireSubmission {
                 .from('children')
                 .select('child_id')
                 .eq('child_id', child_id)
-                .eq('parent_id', parent_id)
+                .eq('parent_user_id', parent_user_id)
                 .single();
 
             if (childError || !childData) {
@@ -32,7 +32,7 @@ export default class QuestionnaireSubmission {
             const { data: submissionData, error: submissionError } = await supabase
                 .from('questionnaire_submissions')
                 .insert([
-                    { parent_id, child_id, responses }
+                    { parent_user_id, child_id, responses }
                 ])
                 .select()
                 .single();
@@ -85,7 +85,7 @@ export default class QuestionnaireSubmission {
                     .insert([
                         {
                             submission_id: submissionData.submission_id,
-                            parent_id,
+                            parent_user_id,
                             child_id,
                             result: prediction
                         }
@@ -136,14 +136,14 @@ export default class QuestionnaireSubmission {
 
     static async getSubmissions(req, res) {
         try {
-            const parent_id = req.user.id;
+            const parent_user_id = req.user.id;
             const { child_id } = req.query;
 
             let query = supabase
                 .from('questionnaire_submissions')
                 // Select submission fields and include child name and linked results
                 .select('*, children(child_name), questionnaire_results(*)')
-                .eq('parent_id', parent_id);
+                .eq('parent_user_id', parent_user_id);
 
             if (child_id) {
                 query = query.eq('child_id', child_id);
@@ -177,13 +177,13 @@ export default class QuestionnaireSubmission {
     static async getSubmission(req, res) {
         try {
             const { submission_id } = req.params;
-            const parent_id = req.user.id;
+            const parent_user_id = req.user.id;
 
             const { data, error } = await supabase
                 .from('questionnaire_submissions')
                 .select('*, children(child_name), questionnaire_results(*)')
                 .eq('submission_id', submission_id)
-                .eq('parent_id', parent_id)
+                .eq('parent_user_id', parent_user_id)
                 .single();
 
             if (error) {
@@ -219,13 +219,13 @@ export default class QuestionnaireSubmission {
     static async deleteSubmission(req, res) {
         try {
             const { submission_id } = req.params;
-            const parent_id = req.user.id;
+            const parent_user_id = req.user.id;
 
             const { error } = await supabase
                 .from('questionnaire_submissions')
                 .delete()
                 .eq('submission_id', submission_id)
-                .eq('parent_id', parent_id);
+                .eq('parent_user_id', parent_user_id);
 
             if (error) {
                 return res.status(400).json({

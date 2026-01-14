@@ -11,7 +11,7 @@ export default class Constants{
     // static EMAIL_USER = process.env.EMAIL_USER;
     // static EMAIL_PASS = process.env.EMAIL_PASS;
     // static EMAIL_FROM = process.env.EMAIL_FROM;
-    // static CLOUD_NAME = process.env.CLOUD_NAME;
-    // static CLOUD_API_KEY = process.env.CLOUD_API_KEY;
-    // static CLOUD_API_SECRET = process.env.CLOUD_API_SECRET;   
+    static CLOUD_NAME = process.env.CLOUD_NAME;
+    static CLOUD_API_KEY = process.env.CLOUD_API_KEY;
+    static CLOUD_API_SECRET = process.env.CLOUD_API_SECRET;   
 }

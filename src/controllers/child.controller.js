@@ -4,7 +4,7 @@ export default class Child {
     static async createChild(req, res) {
         try {
             const { child_name, date_of_birth, gender } = req.body;
-            const parent_id = req.user.id;
+            const parent_user_id = req.user.id;
 
             if (!child_name || !date_of_birth || !gender) {
                 return res.status(400).json({
@@ -13,10 +13,21 @@ export default class Child {
                 });
             }
 
+            // Validate gender and date
+            const allowedGenders = ['male', 'female', 'other'];
+            if (!allowedGenders.includes(String(gender).toLowerCase())) {
+                return res.status(400).json({ message: 'Gender must be one of: male, female, other', status: false });
+            }
+
+            const dob = new Date(date_of_birth);
+            if (isNaN(dob.getTime())) {
+                return res.status(400).json({ message: 'Invalid date_of_birth format', status: false });
+            }
+
             const { data, error } = await supabase
                 .from('children')
                 .insert([
-                    { parent_id, child_name, date_of_birth, gender }
+                    { parent_user_id, child_name, date_of_birth, gender: String(gender).toLowerCase() }
                 ])
                 .select()
                 .single();
@@ -46,12 +57,12 @@ export default class Child {
 
     static async getChildren(req, res) {
         try {
-            const parent_id = req.user.id;
+            const parent_user_id = req.user.id;
 
             const { data, error } = await supabase
                 .from('children')
                 .select('*')
-                .eq('parent_id', parent_id);
+                .eq('parent_user_id', parent_user_id);
 
             if (error) {
                 return res.status(400).json({
@@ -79,13 +90,13 @@ export default class Child {
     static async getChild(req, res) {
         try {
             const { child_id } = req.params;
-            const parent_id = req.user.id;
+            const parent_user_id = req.user.id;
 
             const { data, error } = await supabase
                 .from('children')
                 .select('*')
                 .eq('child_id', child_id)
-                .eq('parent_id', parent_id)
+                .eq('parent_user_id', parent_user_id)
                 .single();
 
             if (error) {
@@ -121,19 +132,31 @@ export default class Child {
     static async updateChild(req, res) {
         try {
             const { child_id } = req.params;
-            const parent_id = req.user.id;
+            const parent_user_id = req.user.id;
             const { child_name, date_of_birth, gender } = req.body;
+
+            // Validate gender/date if provided
+            const allowedGenders = ['male', 'female', 'other'];
+            if (gender && !allowedGenders.includes(String(gender).toLowerCase())) {
+                return res.status(400).json({ message: 'Gender must be one of: male, female, other', status: false });
+            }
+            if (date_of_birth) {
+                const dob = new Date(date_of_birth);
+                if (isNaN(dob.getTime())) {
+                    return res.status(400).json({ message: 'Invalid date_of_birth format', status: false });
+                }
+            }
 
             const updates = {};
             if (child_name) updates.child_name = child_name;
             if (date_of_birth) updates.date_of_birth = date_of_birth;
-            if (gender) updates.gender = gender;
+            if (gender) updates.gender = String(gender).toLowerCase();
 
             const { data, error } = await supabase
                 .from('children')
                 .update(updates)
                 .eq('child_id', child_id)
-                .eq('parent_id', parent_id)
+                .eq('parent_user_id', parent_user_id)
                 .select()
                 .single();
 
@@ -163,13 +186,13 @@ export default class Child {
     static async deleteChild(req, res) {
         try {
             const { child_id } = req.params;
-            const parent_id = req.user.id;
+            const parent_user_id = req.user.id;
 
             const { error } = await supabase
                 .from('children')
                 .delete()
                 .eq('child_id', child_id)
-                .eq('parent_id', parent_id);
+                .eq('parent_user_id', parent_user_id);
 
             if (error) {
                 return res.status(400).json({
