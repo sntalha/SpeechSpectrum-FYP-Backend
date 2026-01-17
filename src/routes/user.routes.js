@@ -7,6 +7,7 @@ const router = Router();
 // Public signup for parents and experts. To create admins pass `role: 'admin'` and an admin Authorization header.
 router.post('/signup', User.signup);
 router.post('/login', User.login);
+router.post('/logout', verifyToken, User.logout);
 router.get('/profile', verifyToken, User.getProfile);
 router.get('/profile/:user_id', verifyToken, User.getProfile);
 router.put('/profile', verifyToken, User.updateProfile);

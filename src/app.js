@@ -18,6 +18,25 @@ app.use('/api/user', userRoutes);
 app.use('/api/children', childRoutes);
 app.use('/api/questionnaire', questionnaireRoutes);
 
-app.listen(Constants.PORT, () => {
-  console.log(`Server is running on http://localhost:${Constants.PORT}`);
+// Health check endpoint for Vercel
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ status: 'ok', message: 'Server is running' });
 });
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(err.status || 500).json({ 
+    message: err.message || 'Internal server error', 
+    status: false 
+  });
+});
+
+// Only listen if not on Vercel (Vercel handles the server)
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  app.listen(Constants.PORT, () => {
+    console.log(`Server is running on http://localhost:${Constants.PORT}`);
+  });
+}
+
+export default app;

@@ -136,6 +136,18 @@ export default class User {
         }
     }
 
+    static async logout(req, res) {
+        try {
+            const { error } = await supabase.auth.signOut();
+            if (error) return res.status(400).json({ message: 'Error logging out', error: error.message });
+
+            res.status(200).json({ message: 'Logout successful', status: true });
+
+        } catch (error) {
+            res.status(500).json({ message: 'Error logging out', error: error.message });
+        }
+    }
+
     // If query param `user_id` is provided, only admins can fetch other users' profiles
     static async getProfile(req, res) {
         try {
