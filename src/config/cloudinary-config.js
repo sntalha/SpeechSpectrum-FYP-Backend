@@ -8,13 +8,39 @@ cloudinary.config({
   api_secret: Constants.CLOUD_API_SECRET,
 });
 
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
+/* Images */
+const imageStorage = new CloudinaryStorage({
+  cloudinary,
   params: {
-    folder: "FYP_Speech_Recordings",
-    resource_type: "video", 
-    allowed_formats: ["wav", "mp3"], 
+    folder: "FYP/images",
+    resource_type: "image",
+    allowed_formats: ["jpg", "jpeg", "png"],
   },
 });
 
-export { cloudinary, storage };
+/* Speech Recordings */
+const speechRecordingStorage = new CloudinaryStorage({
+  cloudinary,
+  params: {
+    folder: "FYP/speech_recordings",
+    resource_type: "video", // audio treated as video
+    allowed_formats: ["wav", "mp3"],
+  },
+});
+
+/* Documents */
+const documentStorage = new CloudinaryStorage({
+  cloudinary,
+  params: {
+    folder: "FYP/documents",
+    resource_type: "raw",
+    allowed_formats: ["pdf", "doc", "docx"],
+  },
+});
+
+export {
+  cloudinary,
+  imageStorage,
+  speechRecordingStorage,
+  documentStorage,
+};

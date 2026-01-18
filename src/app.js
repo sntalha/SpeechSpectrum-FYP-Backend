@@ -5,6 +5,7 @@ import userRoutes from './routes/user.routes.js';
 import childRoutes from './routes/child.routes.js';
 import questionnaireRoutes from './routes/questionnaire.routes.js';
 import speechRoutes from './routes/speech.routes.js';
+import storageRoutes from './routes/storage.routes.js';
 
 const app = express();
 app.use(express.json());
@@ -19,6 +20,7 @@ app.use('/api/user', userRoutes);
 app.use('/api/children', childRoutes);
 app.use('/api/questionnaire', questionnaireRoutes);
 app.use('/api/speech', speechRoutes);
+app.use('/api/storage', storageRoutes);
 
 // Health check endpoint for Vercel
 app.get('/api/health', (req, res) => {

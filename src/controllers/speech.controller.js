@@ -56,7 +56,7 @@ export default class Speech {
 
             if (submissionError) {
                 // If DB insertion fails, delete the uploaded file from Cloudinary
-                await cloudinary.uploader.destroy(`FYP_Speech_Recordings/${recording_public_id}`);
+                await cloudinary.uploader.destroy(`${recording_public_id}`);
                 return res.status(400).json({
                     message: 'Error creating speech submission',
                     error: submissionError.message,
@@ -74,7 +74,7 @@ export default class Speech {
             // Clean up uploaded file on error
             if (req.file?.filename) {
                 try {
-                    await cloudinary.uploader.destroy(`FYP_Speech_Recordings/${req.file.filename}`);
+                    await cloudinary.uploader.destroy(`${req.file.filename}`);
                 } catch (deleteErr) {
                     console.error('Error deleting file from Cloudinary:', deleteErr.message);
                 }
@@ -219,7 +219,7 @@ export default class Speech {
 
             // Delete file from Cloudinary
             const { result } = await cloudinary.uploader.destroy(
-                `FYP_Speech_Recordings/${submissionData.recording_public_id}`
+                `${submissionData.recording_public_id}`
             );
 
             if (result !== 'ok') {
