@@ -1,11 +1,11 @@
 import { Router } from "express";
 import QuestionnaireSubmission from "../controllers/questionnaire.controller.js";
-import { verifyToken } from "../middlewares/auth-middleware.js";
+import { supabaseClientMiddleware } from "../middlewares/auth-middleware.js";
 
 const router = Router();
 
 // All routes require authentication
-router.use(verifyToken);
+router.use(supabaseClientMiddleware);
 
 // CRUD operations for questionnaire submissions
 router.post('/', QuestionnaireSubmission.createSubmission);

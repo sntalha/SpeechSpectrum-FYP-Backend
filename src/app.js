@@ -4,10 +4,11 @@ import testRoutes from './routes/test.routes.js';
 import userRoutes from './routes/user.routes.js';
 import childRoutes from './routes/child.routes.js';
 import questionnaireRoutes from './routes/questionnaire.routes.js';
+import speechRoutes from './routes/speech.routes.js';
 
 const app = express();
 app.use(express.json());
-// Supabase client is initialized in db.connect.js and can be imported as needed
+// Per-request Supabase client is created via supabaseClientMiddleware in each route
 
 app.get('/', (req, res) => {
   res.send('Hello, Supabase Connected.');
@@ -17,6 +18,7 @@ app.use('/api/test', testRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/children', childRoutes);
 app.use('/api/questionnaire', questionnaireRoutes);
+app.use('/api/speech', speechRoutes);
 
 // Health check endpoint for Vercel
 app.get('/api/health', (req, res) => {
