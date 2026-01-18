@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "main": "src/app.js",
   "type": "module",
+  "engines": {
+    "node": ">=18 <21"
+  },
   "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
