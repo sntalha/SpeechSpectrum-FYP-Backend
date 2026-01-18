@@ -1,3 +1,5 @@
+import Constants from '../constant.js';
+
 async function getUserRole(supabase, userId) {
     const { data, error } = await supabase
         .from('profiles')
@@ -134,8 +136,8 @@ export default class User {
     }
 
     static async logout(req, res) {
-        try {supabase = req.supabase;
-            const 
+        try {
+            const supabase = req.supabase;
             const { error } = await supabase.auth.signOut();
             if (error) return res.status(400).json({ message: 'Error logging out', error: error.message });
 
@@ -148,7 +150,8 @@ export default class User {
 
     // If query param `user_id` is provided, only admins can fetch other users' profiles
     static async getProfile(req, res) {
-        try {supabase = req.supabase;
+        try {
+            const supabase = req.supabase;
             const { data: { user }, error: userError } = await supabase.auth.getUser();
             if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
 
@@ -157,12 +160,11 @@ export default class User {
             // If fetching another user's profile, check admin
             const requestedId = req.params.user_id || req.query.user_id;
             if (requestedId && requestedId !== user.id) {
-                const requesterRole = await getUserRole(supabase, {
-                const requesterRole = await getUserRole(req.user.id);
+                const requesterRole = await getUserRole(supabase, user.id);
                 if (requesterRole !== 'admin') return res.status(403).json({ message: 'Forbidden', status: false });
             }
 
-            const role = await getUserRole(targetUserId);
+            const role = await getUserRole(supabase, targetUserId);
             if (!role) return res.status(404).json({ message: 'Profile not found', status: false });
 
             let profile = null;
@@ -186,7 +188,11 @@ export default class User {
             res.status(500).json({ message: 'Error fetching profile', error: error.message });
         }
     }
-supabase = req.supabase;
+
+    // Update own profile (admins can update anyone by passing user_id and being admin)
+    static async updateProfile(req, res) {
+        try {
+            const supabase = req.supabase;
             const { data: { user }, error: userError } = await supabase.auth.getUser();
             if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
 
@@ -194,15 +200,11 @@ supabase = req.supabase;
 
             const requestedId = req.params.user_id || req.query.user_id || req.body.user_id;
             if (requestedId && requestedId !== user.id) {
-                const requesterRole = await getUserRole(supabase, uery.user_id || req.body.user_id || req.user.id;
-
-            const requestedId = req.params.user_id || req.query.user_id || req.body.user_id;
-            if (requestedId && requestedId !== req.user.id) {
-                const requesterRole = await getUserRole(req.user.id);
+                const requesterRole = await getUserRole(supabase, user.id);
                 if (requesterRole !== 'admin') return res.status(403).json({ message: 'Forbidden', status: false });
             }
 
-            const role = await getUserRole(targetUserId);
+            const role = await getUserRole(supabase, targetUserId);
             if (!role) return res.status(404).json({ message: 'Profile not found', status: false });
 
             let updates = {};
@@ -239,7 +241,15 @@ supabase = req.supabase;
                 return res.status(200).json({ message: 'Profile updated successfully', data, status: true });
             }
 
-        } catch (esupabase = req.supabase;
+        } catch (error) {
+            res.status(500).json({ message: 'Error updating profile', error: error.message });
+        }
+    }
+
+    // Delete a user/profile. Admins may pass `user_id` to delete another user.
+    static async deleteProfile(req, res) {
+        try {
+            const supabase = req.supabase;
             const { data: { user }, error: userError } = await supabase.auth.getUser();
             if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
 
@@ -247,19 +257,11 @@ supabase = req.supabase;
 
             const requestedId = req.params.user_id || req.query.user_id || req.body.user_id;
             if (requestedId && requestedId !== user.id) {
-                const requesterRole = await getUserRole(supabase, 
-    // Delete a user/profile. Admins may pass `user_id` to delete another user.
-    static async deleteProfile(req, res) {
-        try {
-            const targetUserId = req.params.user_id || req.query.user_id || req.body.user_id || req.user.id;
-
-            const requestedId = req.params.user_id || req.query.user_id || req.body.user_id;
-            if (requestedId && requestedId !== req.user.id) {
-                const requesterRole = await getUserRole(req.user.id);
+                const requesterRole = await getUserRole(supabase, user.id);
                 if (requesterRole !== 'admin') return res.status(403).json({ message: 'Forbidden', status: false });
             }
 
-            const role = await getUserRole(targetUserId);
+            const role = await getUserRole(supabase, targetUserId);
             if (!role) return res.status(404).json({ message: 'Profile not found', status: false });
 
             // Delete role-specific entry first

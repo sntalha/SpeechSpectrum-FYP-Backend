@@ -1,4 +1,4 @@
-import supabase from '../db/db.connect.js';
+import Constants from '../constant.js';
 
 export default class QuestionnaireSubmission {
     static async createSubmission(req, res) {

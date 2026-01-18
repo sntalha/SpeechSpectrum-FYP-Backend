@@ -1,4 +1,4 @@
-import supabase from '../db/db.connect.js';
+import Constants from '../constant.js';
 import { cloudinary } from '../config/cloudinary-config.js';
 
 export default class Speech {
@@ -130,16 +130,16 @@ export default class Speech {
                 status: false
             });
         }
-    }supabase = req.supabase;
+    }
+
+    static async getSubmission(req, res) {
+        try {
+            const supabase = req.supabase;
             const { data: { user }, error: userError } = await supabase.auth.getUser();
             if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
 
             const { submission_id } = req.params;
-            const parent_user_id = 
-    static async getSubmission(req, res) {
-        try {
-            const { submission_id } = req.params;
-            const parent_user_id = req.user.id;
+            const parent_user_id = user.id;
 
             const { data, error } = await supabase
                 .from('speech_submissions')
@@ -176,16 +176,16 @@ export default class Speech {
                 status: false
             });
         }
-    }supabase = req.supabase;
+    }
+
+    static async deleteSubmission(req, res) {
+        try {
+            const supabase = req.supabase;
             const { data: { user }, error: userError } = await supabase.auth.getUser();
             if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
 
             const { submission_id } = req.params;
-            const parent_user_id = 
-    static async deleteSubmission(req, res) {
-        try {
-            const { submission_id } = req.params;
-            const parent_user_id = req.user.id;
+            const parent_user_id = user.id;
 
             // Fetch the submission to get the public_id before deleting
             const { data: submissionData, error: fetchError } = await supabase
@@ -240,3 +240,4 @@ export default class Speech {
         }
     }
 }
+

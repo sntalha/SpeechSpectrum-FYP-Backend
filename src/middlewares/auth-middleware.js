@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import Constants from '../constant.js';
 
 export const supabaseClientMiddleware = (req, res, next) => {
   try {
@@ -15,8 +16,8 @@ export const supabaseClientMiddleware = (req, res, next) => {
     req.token = token;
 
     req.supabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY,
+      Constants.SUPABASE_URL,
+      Constants.SUPABASE_API_KEY,
       {
         global: {
           headers: {
@@ -40,8 +41,8 @@ export const supabaseClientMiddleware = (req, res, next) => {
 export const supabasePublicClientMiddleware = (req, res, next) => {
   try {
     req.supabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY
+      Constants.SUPABASE_URL,
+      Constants.SUPABASE_API_KEY
     );
     next();
   } catch (error) {
