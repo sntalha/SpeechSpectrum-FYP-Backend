@@ -1,6 +1,4 @@
-import supabase from '../db/db.connect.js';
-
-async function getUserRole(userId) {
+async function getUserRole(supabase, userId) {
     const { data, error } = await supabase
         .from('profiles')
         .select('role')
@@ -16,6 +14,7 @@ export default class User {
     static async signup(req, res) {
         try {
             const { email, password, full_name, phone, role = 'parent', specialization, organization, contact_email } = req.body;
+            const supabase = req.supabase;
 
             if (!email || !password || !full_name) {
                 return res.status(400).json({ message: 'Email, password, and full name are required', status: false });
@@ -23,13 +22,10 @@ export default class User {
 
             // If creating an admin role, ensure requester is an admin
             if (role === 'admin') {
-                const token = req.headers.authorization?.split(' ')[1];
-                if (!token) return res.status(401).json({ message: 'Admin token required to create admin role', status: false });
-
-                const { data: { user: requester }, error: requesterError } = await supabase.auth.getUser(token);
+                const { data: { user: requester }, error: requesterError } = await supabase.auth.getUser();
                 if (requesterError || !requester) return res.status(401).json({ message: 'Invalid admin token', status: false });
 
-                const requesterRole = await getUserRole(requester.id);
+                const requesterRole = await getUserRole(supabase, requester.id);
                 if (requesterRole !== 'admin') return res.status(403).json({ message: 'Only admins can create admins', status: false });
             }
 
@@ -123,6 +119,7 @@ export default class User {
     static async login(req, res) {
         try {
             const { email, password } = req.body;
+            const supabase = req.supabase;
 
             if (!email || !password) return res.status(400).json({ message: 'Email and password are required', status: false });
 
@@ -137,7 +134,8 @@ export default class User {
     }
 
     static async logout(req, res) {
-        try {
+        try {supabase = req.supabase;
+            const 
             const { error } = await supabase.auth.signOut();
             if (error) return res.status(400).json({ message: 'Error logging out', error: error.message });
 
@@ -150,12 +148,16 @@ export default class User {
 
     // If query param `user_id` is provided, only admins can fetch other users' profiles
     static async getProfile(req, res) {
-        try {
-            const targetUserId = req.params.user_id || req.query.user_id || req.user.id;
+        try {supabase = req.supabase;
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
+
+            const targetUserId = req.params.user_id || req.query.user_id || user.id;
 
             // If fetching another user's profile, check admin
             const requestedId = req.params.user_id || req.query.user_id;
-            if (requestedId && requestedId !== req.user.id) {
+            if (requestedId && requestedId !== user.id) {
+                const requesterRole = await getUserRole(supabase, {
                 const requesterRole = await getUserRole(req.user.id);
                 if (requesterRole !== 'admin') return res.status(403).json({ message: 'Forbidden', status: false });
             }
@@ -184,11 +186,15 @@ export default class User {
             res.status(500).json({ message: 'Error fetching profile', error: error.message });
         }
     }
+supabase = req.supabase;
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
 
-    // Update own profile (admins can update anyone by passing user_id and being admin)
-    static async updateProfile(req, res) {
-        try {
-            const targetUserId = req.params.user_id || req.query.user_id || req.body.user_id || req.user.id;
+            const targetUserId = req.params.user_id || req.query.user_id || req.body.user_id || user.id;
+
+            const requestedId = req.params.user_id || req.query.user_id || req.body.user_id;
+            if (requestedId && requestedId !== user.id) {
+                const requesterRole = await getUserRole(supabase, uery.user_id || req.body.user_id || req.user.id;
 
             const requestedId = req.params.user_id || req.query.user_id || req.body.user_id;
             if (requestedId && requestedId !== req.user.id) {
@@ -233,11 +239,15 @@ export default class User {
                 return res.status(200).json({ message: 'Profile updated successfully', data, status: true });
             }
 
-        } catch (error) {
-            res.status(500).json({ message: 'Error updating profile', error: error.message });
-        }
-    }
+        } catch (esupabase = req.supabase;
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
 
+            const targetUserId = req.params.user_id || req.query.user_id || req.body.user_id || user.id;
+
+            const requestedId = req.params.user_id || req.query.user_id || req.body.user_id;
+            if (requestedId && requestedId !== user.id) {
+                const requesterRole = await getUserRole(supabase, 
     // Delete a user/profile. Admins may pass `user_id` to delete another user.
     static async deleteProfile(req, res) {
         try {

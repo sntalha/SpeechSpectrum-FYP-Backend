@@ -8,8 +8,12 @@ export default class Speech {
                 return res.status(400).json({ message: 'Audio file is required', status: false });
             }
 
+            const supabase = req.supabase;
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
+
             const { child_id, recording_duration_seconds, recording_format } = req.body;
-            const parent_user_id = req.user.id;
+            const parent_user_id = user.id;
 
             if (!child_id) {
                 return res.status(400).json({ message: 'Child ID is required', status: false });
@@ -86,7 +90,11 @@ export default class Speech {
 
     static async getSubmissions(req, res) {
         try {
-            const parent_user_id = req.user.id;
+            const supabase = req.supabase;
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
+
+            const parent_user_id = user.id;
             const { child_id } = req.query;
 
             let query = supabase
@@ -122,8 +130,12 @@ export default class Speech {
                 status: false
             });
         }
-    }
+    }supabase = req.supabase;
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
 
+            const { submission_id } = req.params;
+            const parent_user_id = 
     static async getSubmission(req, res) {
         try {
             const { submission_id } = req.params;
@@ -164,8 +176,12 @@ export default class Speech {
                 status: false
             });
         }
-    }
+    }supabase = req.supabase;
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
 
+            const { submission_id } = req.params;
+            const parent_user_id = 
     static async deleteSubmission(req, res) {
         try {
             const { submission_id } = req.params;

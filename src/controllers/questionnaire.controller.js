@@ -3,8 +3,12 @@ import supabase from '../db/db.connect.js';
 export default class QuestionnaireSubmission {
     static async createSubmission(req, res) {
         try {
+            const supabase = req.supabase;
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
+
             const { child_id, responses } = req.body;
-            const parent_user_id = req.user.id;
+            const parent_user_id = user.id;
 
             if (!child_id || !responses) {
                 return res.status(400).json({
@@ -136,7 +140,11 @@ export default class QuestionnaireSubmission {
 
     static async getSubmissions(req, res) {
         try {
-            const parent_user_id = req.user.id;
+            const supabase = req.supabase;
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
+
+            const parent_user_id = user.id;
             const { child_id } = req.query;
 
             let query = supabase
@@ -176,8 +184,12 @@ export default class QuestionnaireSubmission {
 
     static async getSubmission(req, res) {
         try {
+            const supabase = req.supabase;
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
+
             const { submission_id } = req.params;
-            const parent_user_id = req.user.id;
+            const parent_user_id = user.id;
 
             const { data, error } = await supabase
                 .from('questionnaire_submissions')
@@ -218,8 +230,12 @@ export default class QuestionnaireSubmission {
 
     static async deleteSubmission(req, res) {
         try {
+            const supabase = req.supabase;
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
+
             const { submission_id } = req.params;
-            const parent_user_id = req.user.id;
+            const parent_user_id = user.id;
 
             const { error } = await supabase
                 .from('questionnaire_submissions')

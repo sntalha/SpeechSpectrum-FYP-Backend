@@ -36,5 +36,22 @@ export const supabaseClientMiddleware = (req, res, next) => {
   }
 };
 
+// Public client middleware for routes that don't require authentication (signup, login)
+export const supabasePublicClientMiddleware = (req, res, next) => {
+  try {
+    req.supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY
+    );
+    next();
+  } catch (error) {
+    return res.status(500).json({
+      message: 'Error initializing Supabase client',
+      error: error.message,
+      status: false
+    });
+  }
+};
+
 // Alias for backward compatibility
 export const verifyToken = supabaseClientMiddleware;
