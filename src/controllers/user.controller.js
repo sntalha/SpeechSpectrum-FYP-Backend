@@ -16,7 +16,7 @@ export default class User {
     static async signup(req, res) {
         try {
             const { email, password, full_name, phone, role = 'parent', specialization, organization, contact_email } = req.body;
-            const supabase = req.supabase;
+            const adminClient = req.supabase;
 
             if (!email || !password || !full_name) {
                 return res.status(400).json({ message: 'Email, password, and full name are required', status: false });
@@ -24,15 +24,15 @@ export default class User {
 
             // If creating an admin role, ensure requester is an admin
             if (role === 'admin') {
-                const { data: { user: requester }, error: requesterError } = await supabase.auth.getUser();
+                const { data: { user: requester }, error: requesterError } = await adminClient.auth.getUser();
                 if (requesterError || !requester) return res.status(401).json({ message: 'Invalid admin token', status: false });
 
-                const requesterRole = await getUserRole(supabase, requester.id);
+                const requesterRole = await getUserRole(adminClient, requester.id);
                 if (requesterRole !== 'admin') return res.status(403).json({ message: 'Only admins can create admins', status: false });
             }
 
-            // Create auth user
-            const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+            // Create auth user using admin client from middleware
+            const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
                 email,
                 password,
                 email_confirm: true
@@ -42,31 +42,31 @@ export default class User {
                 return res.status(400).json({ message: 'Error creating user', error: authError.message });
             }
 
-            // Insert into profiles table
-            const { error: profileError } = await supabase
+            // Insert into profiles table using admin client (bypasses RLS)
+            const { error: profileError } = await adminClient
                 .from('profiles')
                 .insert([{ user_id: authData.user.id, role }]);
 
             if (profileError) {
-                await supabase.auth.admin.deleteUser(authData.user.id);
+                await adminClient.auth.admin.deleteUser(authData.user.id);
                 return res.status(400).json({ message: 'Error creating profile record', error: profileError.message });
             }
 
             // Insert into role-specific table
             let roleData = null;
             if (role === 'parent') {
-                const { data: parentData, error: parentError } = await supabase
+                const { data: parentData, error: parentError } = await adminClient
                     .from('parents')
                     .insert([{ user_id: authData.user.id, full_name, phone }])
                     .select();
 
                 if (parentError) {
-                    await supabase.auth.admin.deleteUser(authData.user.id);
+                    await adminClient.auth.admin.deleteUser(authData.user.id);
                     return res.status(400).json({ message: 'Error creating parent profile', error: parentError.message });
                 }
 
                 // Sign in the user immediately after creation
-                const { data: sessionData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+                const { data: sessionData, error: signInError } = await adminClient.auth.signInWithPassword({ email, password });
                 if (signInError) {
                     return res.status(400).json({ message: 'User created but login failed', error: signInError.message });
                 }
@@ -75,20 +75,20 @@ export default class User {
                 return res.status(201).json({ message: 'Parent created and logged in successfully', data: roleData, status: true });
 
             } else if (role === 'expert') {
-                const { data: expertData, error: expertError } = await supabase
+                const { data: expertData, error: expertError } = await adminClient
                     .from('expert_users')
                     .insert([{ expert_id: authData.user.id, full_name, specialization, organization, contact_email, phone }])
                     .select();
 
                 if (expertError) {
-                    await supabase.auth.admin.deleteUser(authData.user.id);
+                    await adminClient.auth.admin.deleteUser(authData.user.id);
                     return res.status(400).json({ message: 'Error creating expert profile', error: expertError.message });
                 }
 
                 // Sign in the expert immediately after creation (like parents)
-                const { data: sessionData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+                const { data: sessionData, error: signInError } = await adminClient.auth.signInWithPassword({ email, password });
                 if (signInError) {
-                    await supabase.auth.admin.deleteUser(authData.user.id);
+                    await adminClient.auth.admin.deleteUser(authData.user.id);
                     return res.status(400).json({ message: 'Expert created but login failed', error: signInError.message });
                 }
 
@@ -96,13 +96,13 @@ export default class User {
                 return res.status(201).json({ message: 'Expert created and logged in successfully', data: { user: sessionData.user, session: sessionData.session, profile: roleData }, status: true });
 
             } else if (role === 'admin') {
-                const { data: adminData, error: adminError } = await supabase
+                const { data: adminData, error: adminError } = await adminClient
                     .from('admins')
                     .insert([{ admin_id: authData.user.id, full_name }])
                     .select();
 
                 if (adminError) {
-                    await supabase.auth.admin.deleteUser(authData.user.id);
+                    await adminClient.auth.admin.deleteUser(authData.user.id);
                     return res.status(400).json({ message: 'Error creating admin profile', error: adminError.message });
                 }
 
@@ -121,11 +121,11 @@ export default class User {
     static async login(req, res) {
         try {
             const { email, password } = req.body;
-            const supabase = req.supabase;
+            const adminClient = req.supabase;
 
             if (!email || !password) return res.status(400).json({ message: 'Email and password are required', status: false });
 
-            const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+            const { data, error } = await adminClient.auth.signInWithPassword({ email, password });
             if (error) return res.status(400).json({ message: 'Invalid credentials', error: error.message });
 
             res.status(200).json({ message: 'Login successful', data: { user: data.user, session: data.session }, status: true });

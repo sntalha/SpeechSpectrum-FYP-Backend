@@ -37,17 +37,17 @@ export const supabaseClientMiddleware = (req, res, next) => {
   }
 };
 
-// Public client middleware for routes that don't require authentication (signup, login)
-export const supabasePublicClientMiddleware = (req, res, next) => {
+// Admin client middleware for signup/profile creation (uses service role key to bypass RLS)
+export const supabaseAdminClientMiddleware = (req, res, next) => {
   try {
     req.supabase = createClient(
       Constants.SUPABASE_URL,
-      Constants.SUPABASE_API_KEY
+      Constants.SUPABASE_SERVICE_KEY
     );
     next();
   } catch (error) {
     return res.status(500).json({
-      message: 'Error initializing Supabase client',
+      message: 'Error initializing Supabase admin client',
       error: error.message,
       status: false
     });
