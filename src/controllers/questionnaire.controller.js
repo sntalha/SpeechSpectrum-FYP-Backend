@@ -73,7 +73,7 @@ export default class QuestionnaireSubmission {
 
             try {
                 // Call local prediction service. Assumption: Node runtime provides global fetch (Node 18+).
-                const resp = await fetch('http://127.0.0.1:5000/predict', {
+                const resp = await fetch('https://backendfor-questionnaire-model.vercel.app/predict', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(predictPayload)
