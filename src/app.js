@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import Constants from './constant.js';
 import testRoutes from './routes/test.routes.js';
 import userRoutes from './routes/user.routes.js';
@@ -8,6 +9,7 @@ import speechRoutes from './routes/speech.routes.js';
 import storageRoutes from './routes/storage.routes.js';
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 // Per-request Supabase client is created via supabaseClientMiddleware in each route
 
