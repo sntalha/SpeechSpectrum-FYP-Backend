@@ -3,6 +3,7 @@ import cors from 'cors';
 import Constants from './constant.js';
 import testRoutes from './routes/test.routes.js';
 import userRoutes from './routes/user.routes.js';
+import adminRoutes from './routes/admin.routes.js';
 import childRoutes from './routes/child.routes.js';
 import questionnaireRoutes from './routes/questionnaire.routes.js';
 import speechRoutes from './routes/speech.routes.js';
@@ -19,6 +20,7 @@ app.get('/', (req, res) => {
 
 app.use('/api/test', testRoutes);
 app.use('/api/user', userRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/children', childRoutes);
 app.use('/api/questionnaire', questionnaireRoutes);
 app.use('/api/speech', speechRoutes);

@@ -43,9 +43,11 @@ export default class User {
             }
 
             // Insert into profiles table using admin client (bypasses RLS)
+            // Parents and admins are auto-approved, experts require approval
+            const isApproved = role !== 'expert';
             const { error: profileError } = await adminClient
                 .from('profiles')
-                .insert([{ user_id: authData.user.id, role }]);
+                .insert([{ user_id: authData.user.id, role, is_approved: isApproved }]);
 
             if (profileError) {
                 await adminClient.auth.admin.deleteUser(authData.user.id);
@@ -75,9 +77,28 @@ export default class User {
                 return res.status(201).json({ message: 'Parent created and logged in successfully', data: roleData, status: true });
 
             } else if (role === 'expert') {
+                const { pmdc_number, profile_image_public_id, degree_doc_public_id, certificate_doc_public_id } = req.body;
+
+                if (!pmdc_number) {
+                    await adminClient.auth.admin.deleteUser(authData.user.id);
+                    return res.status(400).json({ message: 'PMDC number is required for experts', status: false });
+                }
+
                 const { data: expertData, error: expertError } = await adminClient
                     .from('expert_users')
-                    .insert([{ expert_id: authData.user.id, full_name, specialization, organization, contact_email, phone }])
+                    .insert([{
+                        expert_id: authData.user.id,
+                        full_name,
+                        specialization,
+                        organization,
+                        contact_email,
+                        phone,
+                        pmdc_number,
+                        profile_image_public_id,
+                        degree_doc_public_id,
+                        certificate_doc_public_id,
+                        approval_status: 'pending'
+                    }])
                     .select();
 
                 if (expertError) {
@@ -85,15 +106,12 @@ export default class User {
                     return res.status(400).json({ message: 'Error creating expert profile', error: expertError.message });
                 }
 
-                // Sign in the expert immediately after creation (like parents)
-                const { data: sessionData, error: signInError } = await adminClient.auth.signInWithPassword({ email, password });
-                if (signInError) {
-                    await adminClient.auth.admin.deleteUser(authData.user.id);
-                    return res.status(400).json({ message: 'Expert created but login failed', error: signInError.message });
-                }
-
                 roleData = expertData[0];
-                return res.status(201).json({ message: 'Expert created and logged in successfully', data: { user: sessionData.user, session: sessionData.session, profile: roleData }, status: true });
+                return res.status(201).json({
+                    message: 'Expert profile created successfully. Awaiting admin approval.',
+                    data: { user: authData.user, profile: roleData },
+                    status: true
+                });
 
             } else if (role === 'admin') {
                 const { data: adminData, error: adminError } = await adminClient
@@ -127,6 +145,22 @@ export default class User {
 
             const { data, error } = await adminClient.auth.signInWithPassword({ email, password });
             if (error) return res.status(400).json({ message: 'Invalid credentials', error: error.message });
+
+            // Check if user is approved
+            const { data: profileData, error: profileError } = await adminClient
+                .from('profiles')
+                .select('is_approved, role')
+                .eq('user_id', data.user.id)
+                .single();
+
+            if (profileError || !profileData) {
+                return res.status(400).json({ message: 'Error fetching user profile', error: profileError?.message });
+            }
+
+            // Block login if not approved (except for parents and admins)
+            if (profileData.role === 'expert' && !profileData.is_approved) {
+                return res.status(403).json({ message: 'Your profile is pending admin approval', status: false });
+            }
 
             res.status(200).json({ message: 'Login successful', data: { user: data.user, session: data.session }, status: true });
 
