@@ -8,6 +8,10 @@ import childRoutes from './routes/child.routes.js';
 import questionnaireRoutes from './routes/questionnaire.routes.js';
 import speechRoutes from './routes/speech.routes.js';
 import storageRoutes from './routes/storage.routes.js';
+import consultationRoutes from './routes/consultation.routes.js';
+import appointmentRoutes from './routes/appointment.routes.js';
+import linkRoutes from './routes/link.routes.js';
+import feedbackRoutes from './routes/feedback.routes.js';
 
 const app = express();
 app.use(cors());
@@ -25,6 +29,10 @@ app.use('/api/children', childRoutes);
 app.use('/api/questionnaire', questionnaireRoutes);
 app.use('/api/speech', speechRoutes);
 app.use('/api/storage', storageRoutes);
+app.use('/api/consultations', consultationRoutes);
+app.use('/api/appointments', appointmentRoutes);
+app.use('/api/links', linkRoutes);
+app.use('/api/feedback', feedbackRoutes);
 
 // Health check endpoint for Vercel
 app.get('/api/health', (req, res) => {
