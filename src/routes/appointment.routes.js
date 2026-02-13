@@ -6,6 +6,7 @@ const router = Router();
 
 router.use(supabaseClientMiddleware);
 
+router.post('/generate-zoom-link', Appointment.generateZoomLink);
 router.post('/create', Appointment.createAppointment);
 router.get('/parent', Appointment.getParentAppointments);
 router.get('/expert', Appointment.getExpertAppointments);

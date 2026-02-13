@@ -13,5 +13,8 @@ export default class Constants{
     // static EMAIL_FROM = process.env.EMAIL_FROM;
     static CLOUD_NAME = process.env.CLOUD_NAME;
     static CLOUD_API_KEY = process.env.CLOUD_API_KEY;
-    static CLOUD_API_SECRET = process.env.CLOUD_API_SECRET;   
+    static CLOUD_API_SECRET = process.env.CLOUD_API_SECRET;
+    static ZOOM_ACCOUNT_ID = process.env.ZOOM_ACCOUNT_ID;
+    static ZOOM_CLIENT_ID = process.env.ZOOM_CLIENT_ID;
+    static ZOOM_CLIENT_SECRET = process.env.ZOOM_CLIENT_SECRET;
 }

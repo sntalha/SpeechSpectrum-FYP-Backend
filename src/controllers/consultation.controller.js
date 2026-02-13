@@ -170,4 +170,56 @@ export default class Consultation {
             res.status(500).json({ message: 'Error responding to consultation request', error: error.message, status: false });
         }
     }
+
+    static async getParentConsultations(req, res) {
+        try {
+            const supabase = req.supabase;
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
+
+            const role = await getUserRole(supabase, user.id);
+            if (role !== 'parent') return res.status(403).json({ message: 'Forbidden', status: false });
+
+            const { data, error } = await supabase
+                .from('consultation_requests')
+                .select('request_id, expert_id, child_id, status, requested_at, expert_users ( expert_id, full_name, specialization, organization, contact_email, phone ), children ( child_id, child_name )')
+                .eq('parent_user_id', user.id)
+                .order('requested_at', { ascending: false });
+
+            if (error) {
+                return res.status(400).json({ message: 'Error fetching consultations', error: error.message, status: false });
+            }
+
+            res.status(200).json({ message: 'Consultations fetched successfully', data, status: true });
+
+        } catch (error) {
+            res.status(500).json({ message: 'Error fetching consultations', error: error.message, status: false });
+        }
+    }
+
+    static async getExpertConsultations(req, res) {
+        try {
+            const supabase = req.supabase;
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
+
+            const role = await getUserRole(supabase, user.id);
+            if (role !== 'expert') return res.status(403).json({ message: 'Forbidden', status: false });
+
+            const { data, error } = await supabase
+                .from('consultation_requests')
+                .select('request_id, parent_user_id, child_id, status, requested_at, children ( child_id, child_name )')
+                .eq('expert_id', user.id)
+                .order('requested_at', { ascending: false });
+
+            if (error) {
+                return res.status(400).json({ message: 'Error fetching consultations', error: error.message, status: false });
+            }
+
+            res.status(200).json({ message: 'Consultations fetched successfully', data, status: true });
+
+        } catch (error) {
+            res.status(500).json({ message: 'Error fetching consultations', error: error.message, status: false });
+        }
+    }
 }

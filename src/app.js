@@ -12,6 +12,7 @@ import consultationRoutes from './routes/consultation.routes.js';
 import appointmentRoutes from './routes/appointment.routes.js';
 import linkRoutes from './routes/link.routes.js';
 import feedbackRoutes from './routes/feedback.routes.js';
+import expertRoutes from './routes/expert.routes.js';
 
 const app = express();
 app.use(cors());
@@ -33,6 +34,7 @@ app.use('/api/consultations', consultationRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/links', linkRoutes);
 app.use('/api/feedback', feedbackRoutes);
+app.use('/api/experts', expertRoutes);
 
 // Health check endpoint for Vercel
 app.get('/api/health', (req, res) => {

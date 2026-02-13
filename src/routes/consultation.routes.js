@@ -8,5 +8,7 @@ router.use(supabaseClientMiddleware);
 
 router.post('/request', Consultation.requestConsultation);
 router.post('/respond', Consultation.respondConsultation);
+router.get('/parent', Consultation.getParentConsultations);
+router.get('/expert', Consultation.getExpertConsultations);
 
 export default router;

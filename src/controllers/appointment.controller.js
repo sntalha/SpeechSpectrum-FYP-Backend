@@ -1,3 +1,5 @@
+import ZoomService from '../utils/zoom-service.js';
+
 async function getUserRole(supabase, userId) {
     const { data, error } = await supabase
         .from('profiles')
@@ -16,6 +18,60 @@ function normalizeAppointmentType(type) {
 }
 
 export default class Appointment {
+    static async generateZoomLink(req, res) {
+        try {
+            const supabase = req.supabase;
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
+
+            const role = await getUserRole(supabase, user.id);
+            if (role !== 'expert') return res.status(403).json({ message: 'Forbidden', status: false });
+
+            const { topic, start_time, duration, timezone } = req.body;
+
+            if (!topic || !start_time) {
+                return res.status(400).json({ 
+                    message: 'topic and start_time are required', 
+                    status: false 
+                });
+            }
+
+            // Validate start_time format
+            const scheduledDate = new Date(start_time);
+            if (isNaN(scheduledDate.getTime())) {
+                return res.status(400).json({ 
+                    message: 'Invalid start_time format. Use ISO 8601 format (e.g., 2026-02-12T10:00:00Z)', 
+                    status: false 
+                });
+            }
+
+            // Create Zoom meeting
+            const meetingDetails = await ZoomService.createMeeting({
+                topic,
+                start_time,
+                duration: duration || 30,
+                timezone: timezone || 'UTC'
+            });
+
+            res.status(200).json({ 
+                message: 'Zoom meeting link generated successfully', 
+                data: {
+                    join_url: meetingDetails.join_url,
+                    meeting_id: meetingDetails.meeting_id,
+                    password: meetingDetails.password
+                }, 
+                status: true 
+            });
+
+        } catch (error) {
+            res.status(500).json({ 
+                message: 'Error generating Zoom link', 
+                error: error.message, 
+                status: false 
+            });
+        }
+    }
+
     static async createAppointment(req, res) {
         try {
             const supabase = req.supabase;
@@ -25,14 +81,14 @@ export default class Appointment {
             const role = await getUserRole(supabase, user.id);
             if (role !== 'expert') return res.status(403).json({ message: 'Forbidden', status: false });
 
-            const { link_id, child_id, parent_user_id, appointment_type, scheduled_at } = req.body;
+            const { link_id, child_id, parent_user_id, appointment_type, scheduled_at, meet_link, contact, location } = req.body;
             if (!appointment_type || !scheduled_at) {
                 return res.status(400).json({ message: 'appointment_type and scheduled_at are required', status: false });
             }
 
             const normalizedType = normalizeAppointmentType(appointment_type);
-            if (!['chat', 'call', 'meet', 'google_meet'].includes(String(appointment_type).toLowerCase())) {
-                return res.status(400).json({ message: 'appointment_type must be chat, call, meet, or google_meet', status: false });
+            if (!['chat', 'call', 'physical', 'google_meet'].includes(String(appointment_type).toLowerCase())) {
+                return res.status(400).json({ message: 'appointment_type must be chat, call, physical, or google_meet', status: false });
             }
 
             const scheduledDate = new Date(scheduled_at);
@@ -61,15 +117,31 @@ export default class Appointment {
                 resolvedLinkId = link.link_id;
             }
 
+            // Prepare appointment data
+            const appointmentData = {
+                link_id: resolvedLinkId,
+                appointment_type: normalizedType,
+                scheduled_at
+            };
+
+            // Add meet_link if provided (for Zoom/Google Meet appointments)
+            if (meet_link) {
+                appointmentData.meet_link = meet_link;
+            }
+
+            // Add contact if provided (for on call appointments)
+            if (contact) {
+                appointmentData.contact = contact;
+            }
+
+            // Add location if provided (for physical appointments)
+            if (location) {
+                appointmentData.location = location;
+            }
+
             const { data, error } = await supabase
                 .from('appointments')
-                .insert([
-                    {
-                        link_id: resolvedLinkId,
-                        appointment_type: normalizedType,
-                        scheduled_at
-                    }
-                ])
+                .insert([appointmentData])
                 .select()
                 .single();
 
