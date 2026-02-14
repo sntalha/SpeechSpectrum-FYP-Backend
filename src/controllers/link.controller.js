@@ -43,11 +43,27 @@ export default class Link {
                 return res.status(400).json({ message: 'No approved consultation request found', status: false });
             }
 
+            // Check if link already exists
+            const { data: existingLink } = await supabase
+                .from('expert_child_links')
+                .select('link_id')
+                .eq('expert_id', resolvedExpertId)
+                .eq('child_id', child_id)
+                .maybeSingle();
+
+            if (existingLink) {
+                return res.status(200).json({
+                    message: 'Expert-child link already exists',
+                    data: existingLink,
+                    status: true
+                });
+            }
+
             const { data: link, error: linkError } = await supabase
                 .from('expert_child_links')
-                .upsert([
+                .insert([
                     { expert_id: resolvedExpertId, child_id, parent_user_id }
-                ], { onConflict: 'expert_id,child_id' })
+                ])
                 .select()
                 .single();
 

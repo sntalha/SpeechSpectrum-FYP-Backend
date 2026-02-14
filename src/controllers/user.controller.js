@@ -73,7 +73,7 @@ export default class User {
                     return res.status(400).json({ message: 'User created but login failed', error: signInError.message });
                 }
 
-                roleData = { user: sessionData.user, session: sessionData.session, profile: parentData[0] };
+                roleData = { user: sessionData.user, session: sessionData.session, role: 'parent', profile: parentData[0] };
                 return res.status(201).json({ message: 'Parent created and logged in successfully', data: roleData, status: true });
 
             } else if (role === 'expert') {
@@ -109,7 +109,7 @@ export default class User {
                 roleData = expertData[0];
                 return res.status(201).json({
                     message: 'Expert profile created successfully. Awaiting admin approval.',
-                    data: { user: authData.user, profile: roleData },
+                    data: { user: authData.user, role: 'expert', profile: roleData },
                     status: true
                 });
 
@@ -125,7 +125,7 @@ export default class User {
                 }
 
                 roleData = adminData[0];
-                return res.status(201).json({ message: 'Admin user created successfully', data: { user: authData.user, profile: roleData }, status: true });
+                return res.status(201).json({ message: 'Admin user created successfully', data: { user: authData.user, role: 'admin', profile: roleData }, status: true });
             }
 
             // Fallback
@@ -162,7 +162,29 @@ export default class User {
                 return res.status(403).json({ message: 'Your profile is pending admin approval', status: false });
             }
 
-            res.status(200).json({ message: 'Login successful', data: { user: data.user, session: data.session }, status: true });
+            // Fetch role-specific profile data
+            let profile = null;
+            if (profileData.role === 'parent') {
+                const { data: parentData } = await adminClient.from('parents').select('*').eq('user_id', data.user.id).single();
+                profile = parentData;
+            } else if (profileData.role === 'expert') {
+                const { data: expertData } = await adminClient.from('expert_users').select('*').eq('expert_id', data.user.id).single();
+                profile = expertData;
+            } else if (profileData.role === 'admin') {
+                const { data: adminData } = await adminClient.from('admins').select('*').eq('admin_id', data.user.id).single();
+                profile = adminData;
+            }
+
+            res.status(200).json({ 
+                message: 'Login successful', 
+                data: { 
+                    user: data.user, 
+                    session: data.session, 
+                    role: profileData.role, 
+                    profile 
+                }, 
+                status: true 
+            });
 
         } catch (error) {
             res.status(500).json({ message: 'Error logging in', error: error.message });
