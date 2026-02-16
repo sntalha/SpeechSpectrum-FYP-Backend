@@ -1,5 +1,7 @@
 import Constants from '../constant.js';
 import { cloudinary } from '../config/cloudinary-config.js';
+import axios from 'axios';
+import FormData from 'form-data';
 
 export default class Speech {
     static async createSubmission(req, res) {
@@ -68,31 +70,66 @@ export default class Speech {
                 const audioFileUrl = req.file.path || req.file.secure_url;
 
                 if (audioFileUrl) {
-                    const audioResponse = await fetch(audioFileUrl);
-
-                    if (!audioResponse.ok) {
-                        throw new Error(`Failed to fetch uploaded audio from Cloudinary (${audioResponse.status})`);
-                    }
-
-                    const audioBlob = await audioResponse.blob();
-                    const formData = new FormData();
-
-                    formData.append(
-                        'file',
-                        audioBlob,
-                        req.file.originalname || `${recording_public_id}.wav`
-                    );
-
-                    const predictionResponse = await fetch('https://asd-speechanalysis.onrender.com/predict', {
-                        method: 'POST',
-                        body: formData
+                    console.log('Fetching audio from Cloudinary:', audioFileUrl);
+                    
+                    // Download audio file from Cloudinary as binary buffer
+                    const audioResponse = await axios.get(audioFileUrl, {
+                        responseType: 'arraybuffer',
+                        timeout: 30000
                     });
 
-                    if (!predictionResponse.ok) {
-                        throw new Error(`Prediction service returned ${predictionResponse.status}`);
+                    // Create FormData matching curl format
+                    const formData = new FormData();
+                    formData.append(
+                        'file',
+                        Buffer.from(audioResponse.data),
+                        {
+                            filename: req.file.originalname || `${recording_public_id}.wav`,
+                            contentType: 'audio/wav'  // Matches curl's type=audio/wav
+                        }
+                    );
+
+                    console.log('Sending to prediction service...');
+                    
+                    // Send to prediction service with retry logic for ECONNRESET
+                    let predictionResponse;
+                    let retries = 3;
+                    let lastError;
+
+                    while (retries > 0) {
+                        try {
+                            predictionResponse = await axios.post(
+                                'https://asd-speechanalysis.onrender.com/predict',
+                                formData,
+                                {
+                                    headers: {
+                                        ...formData.getHeaders(),  // Content-Type with boundary
+                                        'accept': 'application/json'  // Matches curl
+                                    },
+                                    timeout: 120000,  // 2 minutes for cold start
+                                    maxContentLength: Infinity,
+                                    maxBodyLength: Infinity
+                                }
+                            );
+                            console.log('Prediction successful!');
+                            break;  // Success, exit retry loop
+                        } catch (err) {
+                            lastError = err;
+                            retries--;
+                            if (retries > 0) {
+                                console.log(`Request failed, retrying... (${retries} attempts left)`);
+                                console.log('Error:', err.code || err.message);
+                                await new Promise(resolve => setTimeout(resolve, 2000));
+                            }
+                        }
                     }
 
-                    const predictionResult = await predictionResponse.json();
+                    if (!predictionResponse) {
+                        throw lastError;
+                    }
+
+                    const predictionResult = predictionResponse.data;
+                    console.log('Prediction result:', predictionResult);
 
                     const { error: speechResultError } = await supabase
                         .from('speech_results')
@@ -111,6 +148,16 @@ export default class Speech {
                 }
             } catch (predictionError) {
                 console.error('Speech prediction failed:', predictionError.message);
+                if (predictionError.response) {
+                    console.error('Response status:', predictionError.response.status);
+                    console.error('Response data:', predictionError.response.data);
+                } else if (predictionError.request) {
+                    console.error('No response received from prediction service');
+                } else if (predictionError.code === 'ECONNRESET') {
+                    console.error('Connection reset - service may be cold starting');
+                } else {
+                    console.error('Error code:', predictionError.code);
+                }
             }
 
             res.status(201).json({
