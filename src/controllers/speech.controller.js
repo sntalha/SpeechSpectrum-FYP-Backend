@@ -64,6 +64,55 @@ export default class Speech {
                 });
             }
 
+            try {
+                const audioFileUrl = req.file.path || req.file.secure_url;
+
+                if (audioFileUrl) {
+                    const audioResponse = await fetch(audioFileUrl);
+
+                    if (!audioResponse.ok) {
+                        throw new Error(`Failed to fetch uploaded audio from Cloudinary (${audioResponse.status})`);
+                    }
+
+                    const audioBlob = await audioResponse.blob();
+                    const formData = new FormData();
+
+                    formData.append(
+                        'file',
+                        audioBlob,
+                        req.file.originalname || `${recording_public_id}.wav`
+                    );
+
+                    const predictionResponse = await fetch('https://asd-speechanalysis.onrender.com/predict', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (!predictionResponse.ok) {
+                        throw new Error(`Prediction service returned ${predictionResponse.status}`);
+                    }
+
+                    const predictionResult = await predictionResponse.json();
+
+                    const { error: speechResultError } = await supabase
+                        .from('speech_results')
+                        .insert([
+                            {
+                                speech_submission_id: submissionData.speech_submission_id,
+                                parent_user_id,
+                                child_id,
+                                result: predictionResult
+                            }
+                        ]);
+
+                    if (speechResultError) {
+                        console.error('Failed to store speech prediction result:', speechResultError.message);
+                    }
+                }
+            } catch (predictionError) {
+                console.error('Speech prediction failed:', predictionError.message);
+            }
+
             res.status(201).json({
                 message: 'Speech submission created successfully',
                 data: submissionData,
@@ -99,7 +148,7 @@ export default class Speech {
 
             let query = supabase
                 .from('speech_submissions')
-                .select('*, children(child_name)')
+                .select('*, children(child_name), speech_results(*)')
                 .eq('parent_user_id', parent_user_id)
                 .order('submitted_at', { ascending: false });
 
@@ -143,7 +192,7 @@ export default class Speech {
 
             const { data, error } = await supabase
                 .from('speech_submissions')
-                .select('*, children(child_name)')
+                .select('*, children(child_name), speech_results(*)')
                 .eq('speech_submission_id', submission_id)
                 .eq('parent_user_id', parent_user_id)
                 .single();
