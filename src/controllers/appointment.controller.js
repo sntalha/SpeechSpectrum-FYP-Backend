@@ -1,51 +1,667 @@
 import ZoomService from '../utils/zoom-service.js';
 
-async function getUserRole(supabase, userId) {
-    const { data, error } = await supabase
+async function getAuthContext(supabase) {
+    const { data: authData, error: userError } = await supabase.auth.getUser();
+    if (userError || !authData?.user) {
+        return { error: 'Unauthorized' };
+    }
+
+    const { data: profile, error: roleError } = await supabase
         .from('profiles')
         .select('role')
-        .eq('user_id', userId)
+        .eq('user_id', authData.user.id)
         .single();
 
-    if (error) return null;
-    return data?.role || null;
+    if (roleError || !profile?.role) {
+        return { error: 'Forbidden' };
+    }
+
+    return { user: authData.user, role: profile.role };
 }
 
-function normalizeAppointmentType(type) {
-    const normalized = String(type).toLowerCase();
-    if (normalized === 'google_meet') return 'meet';
-    return normalized;
+function combineDateAndTime(slotDate, startTime) {
+    const scheduledAt = new Date(`${slotDate}T${startTime}`);
+    return Number.isNaN(scheduledAt.getTime()) ? null : scheduledAt.toISOString();
+}
+
+function getDurationMinutes(startTime, endTime) {
+    const start = new Date(`1970-01-01T${startTime}`);
+    const end = new Date(`1970-01-01T${endTime}`);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return null;
+    }
+
+    const diffMs = end.getTime() - start.getTime();
+    if (diffMs <= 0) {
+        return null;
+    }
+
+    return Math.floor(diffMs / 60000);
+}
+
+function resolveFee(slot, bookedMode) {
+    if (bookedMode === 'online') {
+        return slot.fee_online;
+    }
+
+    if (bookedMode === 'physical') {
+        return slot.fee_physical;
+    }
+
+    return null;
+}
+
+function canUseMode(slotMode, bookedMode) {
+    return slotMode === 'both' || slotMode === bookedMode;
+}
+
+async function getAppointmentByIdWithRelations(supabase, appointmentId) {
+    return supabase
+        .from('appointments')
+        .select(`
+            appointment_id,
+            slot_id,
+            expert_id,
+            parent_id,
+            child_id,
+            booked_mode,
+            fee_charged,
+            currency,
+            scheduled_at,
+            duration_minutes,
+            status,
+            meet_link,
+            cancelled_by,
+            cancellation_reason,
+            cancelled_at,
+            created_at,
+            updated_at,
+            appointment_slots (
+                slot_id,
+                slot_date,
+                start_time,
+                end_time,
+                mode,
+                status,
+                location_id,
+                expert_locations (
+                    location_id,
+                    label,
+                    address,
+                    city,
+                    maps_url
+                )
+            ),
+            children (
+                child_id,
+                child_name
+            ),
+            expert_users (
+                expert_id,
+                full_name,
+                specialization,
+                contact_email,
+                phone
+            )
+        `)
+        .eq('appointment_id', appointmentId)
+        .single();
 }
 
 export default class Appointment {
+    static async bookAppointment(req, res) {
+        try {
+            const supabase = req.supabase;
+            const auth = await getAuthContext(supabase);
+
+            if (auth.error === 'Unauthorized') {
+                return res.status(401).json({ success: false, message: 'Unauthorized' });
+            }
+
+            if (auth.role !== 'parent') {
+                return res.status(403).json({ success: false, message: 'Forbidden' });
+            }
+
+            const { slot_id, child_id, booked_mode } = req.body;
+
+            if (!slot_id || !child_id || !booked_mode) {
+                return res.status(400).json({ success: false, message: 'slot_id, child_id and booked_mode are required' });
+            }
+
+            const normalizedMode = String(booked_mode).toLowerCase();
+            if (!['online', 'physical'].includes(normalizedMode)) {
+                return res.status(400).json({ success: false, message: 'booked_mode must be online or physical' });
+            }
+
+            const { data: child, error: childError } = await supabase
+                .from('children')
+                .select('child_id, parent_user_id')
+                .eq('child_id', child_id)
+                .single();
+
+            if (childError) {
+                return res.status(400).json({ success: false, message: childError.message });
+            }
+
+            if (!child || child.parent_user_id !== auth.user.id) {
+                return res.status(403).json({ success: false, message: 'You can only book appointments for your own child' });
+            }
+
+            const { data: slot, error: slotError } = await supabase
+                .from('appointment_slots')
+                .select('slot_id, expert_id, slot_date, start_time, end_time, mode, fee_online, fee_physical, currency, status')
+                .eq('slot_id', slot_id)
+                .single();
+
+            if (slotError) {
+                return res.status(400).json({ success: false, message: slotError.message });
+            }
+
+            if (!slot) {
+                return res.status(404).json({ success: false, message: 'Slot not found' });
+            }
+
+            if (slot.status !== 'available') {
+                return res.status(400).json({ success: false, message: 'Slot is not available' });
+            }
+
+            if (!canUseMode(slot.mode, normalizedMode)) {
+                return res.status(400).json({ success: false, message: 'Requested booking mode is not supported for this slot' });
+            }
+
+            const feeCharged = resolveFee(slot, normalizedMode);
+            if (feeCharged === null || feeCharged === undefined) {
+                return res.status(400).json({ success: false, message: 'Selected slot does not have a fee for this mode' });
+            }
+
+            const scheduledAt = combineDateAndTime(slot.slot_date, slot.start_time);
+            if (!scheduledAt) {
+                return res.status(400).json({ success: false, message: 'Invalid slot date/time' });
+            }
+
+            const durationMinutes = getDurationMinutes(slot.start_time, slot.end_time);
+            if (!durationMinutes) {
+                return res.status(400).json({ success: false, message: 'Invalid slot duration' });
+            }
+
+            const { data: bookedSlot, error: updateSlotError } = await supabase
+                .from('appointment_slots')
+                .update({ status: 'booked' })
+                .eq('slot_id', slot.slot_id)
+                .eq('status', 'available')
+                .select('slot_id')
+                .maybeSingle();
+
+            if (updateSlotError) {
+                return res.status(400).json({ success: false, message: updateSlotError.message });
+            }
+
+            if (!bookedSlot) {
+                const { data: latestSlot, error: latestSlotError } = await supabase
+                    .from('appointment_slots')
+                    .select('slot_id, status')
+                    .eq('slot_id', slot.slot_id)
+                    .maybeSingle();
+
+                if (latestSlotError) {
+                    return res.status(400).json({ success: false, message: latestSlotError.message });
+                }
+
+                if (latestSlot && latestSlot.status === 'available') {
+                    return res.status(403).json({
+                        success: false,
+                        message: 'Booking failed due to slot update permission (RLS policy). Slot is still available.'
+                    });
+                }
+
+                return res.status(400).json({ success: false, message: 'Slot is no longer available' });
+            }
+
+            const { data: appointment, error: insertAppointmentError } = await supabase
+                .from('appointments')
+                .insert([
+                    {
+                        slot_id: slot.slot_id,
+                        expert_id: slot.expert_id,
+                        parent_id: auth.user.id,
+                        child_id,
+                        booked_mode: normalizedMode,
+                        fee_charged: feeCharged,
+                        currency: slot.currency || 'PKR',
+                        scheduled_at: scheduledAt,
+                        duration_minutes: durationMinutes,
+                        status: 'scheduled'
+                    }
+                ])
+                .select()
+                .single();
+
+            if (insertAppointmentError) {
+                const { error: revertError } = await supabase
+                    .from('appointment_slots')
+                    .update({ status: 'available' })
+                    .eq('slot_id', slot.slot_id);
+
+                if (revertError) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Appointment creation failed and slot rollback failed: ${insertAppointmentError.message}`
+                    });
+                }
+
+                return res.status(400).json({ success: false, message: insertAppointmentError.message });
+            }
+
+            return res.status(201).json({ success: true, data: appointment });
+        } catch (error) {
+            return res.status(500).json({ success: false, message: 'Internal server error' });
+        }
+    }
+
+    static async getMyAppointments(req, res) {
+        try {
+            const supabase = req.supabase;
+            const auth = await getAuthContext(supabase);
+
+            if (auth.error === 'Unauthorized') {
+                return res.status(401).json({ success: false, message: 'Unauthorized' });
+            }
+
+            if (!['parent', 'expert'].includes(auth.role)) {
+                return res.status(403).json({ success: false, message: 'Forbidden' });
+            }
+
+            let query = supabase
+                .from('appointments')
+                .select(`
+                    appointment_id,
+                    slot_id,
+                    expert_id,
+                    parent_id,
+                    child_id,
+                    booked_mode,
+                    fee_charged,
+                    currency,
+                    scheduled_at,
+                    duration_minutes,
+                    status,
+                    meet_link,
+                    cancelled_by,
+                    cancellation_reason,
+                    cancelled_at,
+                    created_at,
+                    updated_at,
+                    children ( child_id, child_name ),
+                    expert_users ( expert_id, full_name, specialization ),
+                    appointment_slots ( slot_id, slot_date, start_time, end_time, mode, location_id )
+                `)
+                .order('scheduled_at', { ascending: false });
+
+            if (auth.role === 'parent') {
+                query = query.eq('parent_id', auth.user.id);
+            } else {
+                query = query.eq('expert_id', auth.user.id);
+            }
+
+            const { data, error } = await query;
+            if (error) {
+                return res.status(400).json({ success: false, message: error.message });
+            }
+
+            return res.status(200).json({ success: true, data });
+        } catch (error) {
+            return res.status(500).json({ success: false, message: 'Internal server error' });
+        }
+    }
+
+    static async getAppointmentById(req, res) {
+        try {
+            const supabase = req.supabase;
+            const auth = await getAuthContext(supabase);
+
+            if (auth.error === 'Unauthorized') {
+                return res.status(401).json({ success: false, message: 'Unauthorized' });
+            }
+
+            if (!['parent', 'expert', 'admin'].includes(auth.role)) {
+                return res.status(403).json({ success: false, message: 'Forbidden' });
+            }
+
+            const { appointmentId } = req.params;
+
+            const { data: appointment, error } = await getAppointmentByIdWithRelations(supabase, appointmentId);
+
+            if (error) {
+                return res.status(400).json({ success: false, message: error.message });
+            }
+
+            if (!appointment) {
+                return res.status(404).json({ success: false, message: 'Appointment not found' });
+            }
+
+            if (auth.role === 'parent' && appointment.parent_id !== auth.user.id) {
+                return res.status(403).json({ success: false, message: 'Forbidden' });
+            }
+
+            if (auth.role === 'expert' && appointment.expert_id !== auth.user.id) {
+                return res.status(403).json({ success: false, message: 'Forbidden' });
+            }
+
+            return res.status(200).json({ success: true, data: appointment });
+        } catch (error) {
+            return res.status(500).json({ success: false, message: 'Internal server error' });
+        }
+    }
+
+    static async confirmAppointment(req, res) {
+        try {
+            const supabase = req.supabase;
+            const auth = await getAuthContext(supabase);
+
+            if (auth.error === 'Unauthorized') {
+                return res.status(401).json({ success: false, message: 'Unauthorized' });
+            }
+
+            if (auth.role !== 'expert') {
+                return res.status(403).json({ success: false, message: 'Forbidden' });
+            }
+
+            const { appointmentId } = req.params;
+
+            const { data: appointment, error: appointmentError } = await supabase
+                .from('appointments')
+                .select('appointment_id, expert_id, status')
+                .eq('appointment_id', appointmentId)
+                .single();
+
+            if (appointmentError) {
+                return res.status(400).json({ success: false, message: appointmentError.message });
+            }
+
+            if (!appointment) {
+                return res.status(404).json({ success: false, message: 'Appointment not found' });
+            }
+
+            if (appointment.expert_id !== auth.user.id) {
+                return res.status(403).json({ success: false, message: 'Forbidden' });
+            }
+
+            if (appointment.status === 'cancelled') {
+                return res.status(400).json({ success: false, message: 'Cancelled appointment cannot be confirmed' });
+            }
+
+            const { data, error } = await supabase
+                .from('appointments')
+                .update({ status: 'confirmed' })
+                .eq('appointment_id', appointmentId)
+                .select()
+                .single();
+
+            if (error) {
+                return res.status(400).json({ success: false, message: error.message });
+            }
+
+            return res.status(200).json({ success: true, data });
+        } catch (error) {
+            return res.status(500).json({ success: false, message: 'Internal server error' });
+        }
+    }
+
+    static async completeAppointment(req, res) {
+        try {
+            const supabase = req.supabase;
+            const auth = await getAuthContext(supabase);
+
+            if (auth.error === 'Unauthorized') {
+                return res.status(401).json({ success: false, message: 'Unauthorized' });
+            }
+
+            if (auth.role !== 'expert') {
+                return res.status(403).json({ success: false, message: 'Forbidden' });
+            }
+
+            const { appointmentId } = req.params;
+
+            const { data: appointment, error: appointmentError } = await supabase
+                .from('appointments')
+                .select('appointment_id, expert_id, status')
+                .eq('appointment_id', appointmentId)
+                .single();
+
+            if (appointmentError) {
+                return res.status(400).json({ success: false, message: appointmentError.message });
+            }
+
+            if (!appointment) {
+                return res.status(404).json({ success: false, message: 'Appointment not found' });
+            }
+
+            if (appointment.expert_id !== auth.user.id) {
+                return res.status(403).json({ success: false, message: 'Forbidden' });
+            }
+
+            if (appointment.status === 'cancelled') {
+                return res.status(400).json({ success: false, message: 'Cancelled appointment cannot be completed' });
+            }
+
+            const { data, error } = await supabase
+                .from('appointments')
+                .update({ status: 'completed' })
+                .eq('appointment_id', appointmentId)
+                .select()
+                .single();
+
+            if (error) {
+                return res.status(400).json({ success: false, message: error.message });
+            }
+
+            return res.status(200).json({ success: true, data });
+        } catch (error) {
+            return res.status(500).json({ success: false, message: 'Internal server error' });
+        }
+    }
+
+    static async cancelAppointment(req, res) {
+        try {
+            const supabase = req.supabase;
+            const auth = await getAuthContext(supabase);
+
+            if (auth.error === 'Unauthorized') {
+                return res.status(401).json({ success: false, message: 'Unauthorized' });
+            }
+
+            if (!['parent', 'expert'].includes(auth.role)) {
+                return res.status(403).json({ success: false, message: 'Forbidden' });
+            }
+
+            const { appointmentId } = req.params;
+            const { cancellation_reason } = req.body;
+
+            const { data: appointment, error: appointmentError } = await supabase
+                .from('appointments')
+                .select('appointment_id, slot_id, parent_id, expert_id, status')
+                .eq('appointment_id', appointmentId)
+                .single();
+
+            if (appointmentError) {
+                return res.status(400).json({ success: false, message: appointmentError.message });
+            }
+
+            if (!appointment) {
+                return res.status(404).json({ success: false, message: 'Appointment not found' });
+            }
+
+            if (auth.role === 'parent' && appointment.parent_id !== auth.user.id) {
+                return res.status(403).json({ success: false, message: 'Forbidden' });
+            }
+
+            if (auth.role === 'expert' && appointment.expert_id !== auth.user.id) {
+                return res.status(403).json({ success: false, message: 'Forbidden' });
+            }
+
+            if (appointment.status === 'cancelled') {
+                return res.status(400).json({ success: false, message: 'Appointment is already cancelled' });
+            }
+
+            const { data, error: cancelError } = await supabase
+                .from('appointments')
+                .update({
+                    status: 'cancelled',
+                    cancelled_by: auth.role,
+                    cancellation_reason: cancellation_reason || null,
+                    cancelled_at: new Date().toISOString()
+                })
+                .eq('appointment_id', appointmentId)
+                .select()
+                .single();
+
+            if (cancelError) {
+                return res.status(400).json({ success: false, message: cancelError.message });
+            }
+
+            const { error: revertSlotError } = await supabase
+                .from('appointment_slots')
+                .update({ status: 'available' })
+                .eq('slot_id', appointment.slot_id);
+
+            if (revertSlotError) {
+                return res.status(400).json({ success: false, message: revertSlotError.message });
+            }
+
+            return res.status(200).json({ success: true, data });
+        } catch (error) {
+            return res.status(500).json({ success: false, message: 'Internal server error' });
+        }
+    }
+
+    static async markNoShow(req, res) {
+        try {
+            const supabase = req.supabase;
+            const auth = await getAuthContext(supabase);
+
+            if (auth.error === 'Unauthorized') {
+                return res.status(401).json({ success: false, message: 'Unauthorized' });
+            }
+
+            if (auth.role !== 'expert') {
+                return res.status(403).json({ success: false, message: 'Forbidden' });
+            }
+
+            const { appointmentId } = req.params;
+
+            const { data: appointment, error: appointmentError } = await supabase
+                .from('appointments')
+                .select('appointment_id, expert_id, status')
+                .eq('appointment_id', appointmentId)
+                .single();
+
+            if (appointmentError) {
+                return res.status(400).json({ success: false, message: appointmentError.message });
+            }
+
+            if (!appointment) {
+                return res.status(404).json({ success: false, message: 'Appointment not found' });
+            }
+
+            if (appointment.expert_id !== auth.user.id) {
+                return res.status(403).json({ success: false, message: 'Forbidden' });
+            }
+
+            if (appointment.status === 'cancelled') {
+                return res.status(400).json({ success: false, message: 'Cancelled appointment cannot be marked as no_show' });
+            }
+
+            const { data, error } = await supabase
+                .from('appointments')
+                .update({ status: 'no_show' })
+                .eq('appointment_id', appointmentId)
+                .select()
+                .single();
+
+            if (error) {
+                return res.status(400).json({ success: false, message: error.message });
+            }
+
+            return res.status(200).json({ success: true, data });
+        } catch (error) {
+            return res.status(500).json({ success: false, message: 'Internal server error' });
+        }
+    }
+
+    static async getAllAppointments(req, res) {
+        try {
+            const supabase = req.supabase;
+            const auth = await getAuthContext(supabase);
+
+            if (auth.error === 'Unauthorized') {
+                return res.status(401).json({ success: false, message: 'Unauthorized' });
+            }
+
+            if (auth.role !== 'admin') {
+                return res.status(403).json({ success: false, message: 'Forbidden' });
+            }
+
+            const { data, error } = await supabase
+                .from('appointments')
+                .select(`
+                    appointment_id,
+                    slot_id,
+                    expert_id,
+                    parent_id,
+                    child_id,
+                    booked_mode,
+                    fee_charged,
+                    currency,
+                    scheduled_at,
+                    duration_minutes,
+                    status,
+                    meet_link,
+                    cancelled_by,
+                    cancellation_reason,
+                    cancelled_at,
+                    created_at,
+                    updated_at,
+                    children ( child_id, child_name ),
+                    expert_users ( expert_id, full_name, specialization ),
+                    appointment_slots ( slot_id, slot_date, start_time, end_time, mode )
+                `)
+                .order('created_at', { ascending: false });
+
+            if (error) {
+                return res.status(400).json({ success: false, message: error.message });
+            }
+
+            return res.status(200).json({ success: true, data });
+        } catch (error) {
+            return res.status(500).json({ success: false, message: 'Internal server error' });
+        }
+    }
+
     static async generateZoomLink(req, res) {
         try {
             const supabase = req.supabase;
-            const { data: { user }, error: userError } = await supabase.auth.getUser();
-            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
+            const auth = await getAuthContext(supabase);
 
-            const role = await getUserRole(supabase, user.id);
-            if (role !== 'expert') return res.status(403).json({ message: 'Forbidden', status: false });
+            if (auth.error === 'Unauthorized') {
+                return res.status(401).json({ success: false, message: 'Unauthorized' });
+            }
+
+            if (auth.role !== 'expert') {
+                return res.status(403).json({ success: false, message: 'Forbidden' });
+            }
 
             const { topic, start_time, duration, timezone } = req.body;
 
             if (!topic || !start_time) {
-                return res.status(400).json({ 
-                    message: 'topic and start_time are required', 
-                    status: false 
-                });
+                return res.status(400).json({ success: false, message: 'topic and start_time are required' });
             }
 
-            // Validate start_time format
-            const scheduledDate = new Date(start_time);
-            if (isNaN(scheduledDate.getTime())) {
-                return res.status(400).json({ 
-                    message: 'Invalid start_time format. Use ISO 8601 format (e.g., 2026-02-12T10:00:00Z)', 
-                    status: false 
-                });
+            const parsedDate = new Date(start_time);
+            if (Number.isNaN(parsedDate.getTime())) {
+                return res.status(400).json({ success: false, message: 'Invalid start_time format' });
             }
 
-            // Create Zoom meeting
             const meetingDetails = await ZoomService.createMeeting({
                 topic,
                 start_time,
@@ -53,397 +669,16 @@ export default class Appointment {
                 timezone: timezone || 'UTC'
             });
 
-            res.status(200).json({ 
-                message: 'Zoom meeting link generated successfully', 
+            return res.status(200).json({
+                success: true,
                 data: {
                     join_url: meetingDetails.join_url,
                     meeting_id: meetingDetails.meeting_id,
                     password: meetingDetails.password
-                }, 
-                status: true 
+                }
             });
-
         } catch (error) {
-            res.status(500).json({ 
-                message: 'Error generating Zoom link', 
-                error: error.message, 
-                status: false 
-            });
-        }
-    }
-
-    static async createAppointment(req, res) {
-        try {
-            const supabase = req.supabase;
-            const { data: { user }, error: userError } = await supabase.auth.getUser();
-            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
-
-            const role = await getUserRole(supabase, user.id);
-            if (role !== 'expert') return res.status(403).json({ message: 'Forbidden', status: false });
-
-            const { link_id, child_id, parent_user_id, appointment_type, scheduled_at, meet_link, contact, location } = req.body;
-            if (!appointment_type || !scheduled_at) {
-                return res.status(400).json({ message: 'appointment_type and scheduled_at are required', status: false });
-            }
-
-            const normalizedType = normalizeAppointmentType(appointment_type);
-            if (!['chat', 'call', 'physical', 'google_meet'].includes(String(appointment_type).toLowerCase())) {
-                return res.status(400).json({ message: 'appointment_type must be chat, call, physical, or google_meet', status: false });
-            }
-
-            const scheduledDate = new Date(scheduled_at);
-            if (isNaN(scheduledDate.getTime())) {
-                return res.status(400).json({ message: 'Invalid scheduled_at format', status: false });
-            }
-
-            let resolvedLinkId = link_id;
-            if (!resolvedLinkId) {
-                if (!child_id || !parent_user_id) {
-                    return res.status(400).json({ message: 'link_id or child_id and parent_user_id are required', status: false });
-                }
-
-                const { data: link, error: linkError } = await supabase
-                    .from('expert_child_links')
-                    .select('link_id')
-                    .eq('expert_id', user.id)
-                    .eq('child_id', child_id)
-                    .eq('parent_user_id', parent_user_id)
-                    .single();
-
-                if (linkError || !link) {
-                    return res.status(404).json({ message: 'Expert-child link not found', status: false });
-                }
-
-                resolvedLinkId = link.link_id;
-            }
-
-            // Prepare appointment data
-            const appointmentData = {
-                link_id: resolvedLinkId,
-                appointment_type: normalizedType,
-                scheduled_at
-            };
-
-            // Add meet_link if provided (for Zoom/Google Meet appointments)
-            if (meet_link) {
-                appointmentData.meet_link = meet_link;
-            }
-
-            // Add contact if provided (for on call appointments)
-            if (contact) {
-                appointmentData.contact = contact;
-            }
-
-            // Add location if provided (for physical appointments)
-            if (location) {
-                appointmentData.location = location;
-            }
-
-            const { data, error } = await supabase
-                .from('appointments')
-                .insert([appointmentData])
-                .select()
-                .single();
-
-            if (error) {
-                return res.status(400).json({ message: 'Error creating appointment', error: error.message, status: false });
-            }
-
-            res.status(201).json({ message: 'Appointment created successfully', data, status: true });
-
-        } catch (error) {
-            res.status(500).json({ message: 'Error creating appointment', error: error.message, status: false });
-        }
-    }
-
-    static async getParentAppointments(req, res) {
-        try {
-            const supabase = req.supabase;
-            const { data: { user }, error: userError } = await supabase.auth.getUser();
-            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
-
-            const role = await getUserRole(supabase, user.id);
-            if (role !== 'parent') return res.status(403).json({ message: 'Forbidden', status: false });
-
-            const { data, error } = await supabase
-                .from('appointments')
-                .select('appointment_id, appointment_type, scheduled_at, status, created_at, expert_child_links ( link_id, parent_user_id, child_id, expert_id, children ( child_id, child_name ), expert_users ( expert_id, full_name, specialization, organization, contact_email, phone ) )')
-                .eq('expert_child_links.parent_user_id', user.id)
-                .order('scheduled_at', { ascending: false });
-
-            if (error) {
-                return res.status(400).json({ message: 'Error fetching appointments', error: error.message, status: false });
-            }
-
-            res.status(200).json({ message: 'Appointments fetched successfully', data, status: true });
-
-        } catch (error) {
-            res.status(500).json({ message: 'Error fetching appointments', error: error.message, status: false });
-        }
-    }
-
-    static async getExpertAppointments(req, res) {
-        try {
-            const supabase = req.supabase;
-            const { data: { user }, error: userError } = await supabase.auth.getUser();
-            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
-
-            const role = await getUserRole(supabase, user.id);
-            if (role !== 'expert') return res.status(403).json({ message: 'Forbidden', status: false });
-
-            const { data, error } = await supabase
-                .from('appointments')
-                .select('appointment_id, appointment_type, scheduled_at, status, created_at, expert_child_links ( link_id, parent_user_id, child_id, expert_id, children ( child_id, child_name ) )')
-                .eq('expert_child_links.expert_id', user.id)
-                .order('scheduled_at', { ascending: false });
-
-            if (error) {
-                return res.status(400).json({ message: 'Error fetching appointments', error: error.message, status: false });
-            }
-
-            res.status(200).json({ message: 'Appointments fetched successfully', data, status: true });
-
-        } catch (error) {
-            res.status(500).json({ message: 'Error fetching appointments', error: error.message, status: false });
-        }
-    }
-
-    static async addAppointmentNotes(req, res) {
-        try {
-            const supabase = req.supabase;
-            const { data: { user }, error: userError } = await supabase.auth.getUser();
-            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
-
-            const role = await getUserRole(supabase, user.id);
-            if (role !== 'expert') return res.status(403).json({ message: 'Forbidden', status: false });
-
-            const { id: appointment_id } = req.params;
-            const { discussion_summary, notes, medication } = req.body;
-
-            if (!discussion_summary && !notes && !medication) {
-                return res.status(400).json({ message: 'discussion_summary, notes, or medication is required', status: false });
-            }
-
-            const { data: appointment, error: appointmentError } = await supabase
-                .from('appointments')
-                .select('appointment_id, link_id, expert_child_links ( expert_id )')
-                .eq('appointment_id', appointment_id)
-                .single();
-
-            if (appointmentError || !appointment) {
-                return res.status(404).json({ message: 'Appointment not found', status: false });
-            }
-
-            if (appointment.expert_child_links?.expert_id !== user.id) {
-                return res.status(403).json({ message: 'Forbidden', status: false });
-            }
-
-            const { data: existingRecord, error: existingError } = await supabase
-                .from('appointment_records')
-                .select('record_id')
-                .eq('appointment_id', appointment_id)
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-
-            if (existingError) {
-                return res.status(400).json({ message: 'Error checking appointment record', error: existingError.message, status: false });
-            }
-
-            const updates = {};
-            if (discussion_summary !== undefined) updates.therapy_plan = discussion_summary;
-            if (notes !== undefined) updates.notes = notes;
-            if (medication !== undefined) updates.medication = medication;
-
-            let recordData = null;
-            if (existingRecord) {
-                const { data, error } = await supabase
-                    .from('appointment_records')
-                    .update(updates)
-                    .eq('record_id', existingRecord.record_id)
-                    .select()
-                    .single();
-
-                if (error) {
-                    return res.status(400).json({ message: 'Error updating appointment record', error: error.message, status: false });
-                }
-                recordData = data;
-            } else {
-                const { data, error } = await supabase
-                    .from('appointment_records')
-                    .insert([
-                        {
-                            appointment_id,
-                            therapy_plan: discussion_summary ?? null,
-                            notes: notes ?? null,
-                            medication: medication ?? null
-                        }
-                    ])
-                    .select()
-                    .single();
-
-                if (error) {
-                    return res.status(400).json({ message: 'Error creating appointment record', error: error.message, status: false });
-                }
-                recordData = data;
-            }
-
-            res.status(200).json({ message: 'Appointment notes saved successfully', data: recordData, status: true });
-
-        } catch (error) {
-            res.status(500).json({ message: 'Error saving appointment notes', error: error.message, status: false });
-        }
-    }
-
-    static async getAppointmentDetails(req, res) {
-        try {
-            const supabase = req.supabase;
-            const { data: { user }, error: userError } = await supabase.auth.getUser();
-            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
-
-            const role = await getUserRole(supabase, user.id);
-            if (!['parent', 'expert', 'admin'].includes(role)) return res.status(403).json({ message: 'Forbidden', status: false });
-
-            const { id: appointment_id } = req.params;
-
-            const { data: appointment, error: appointmentError } = await supabase
-                .from('appointments')
-                .select('appointment_id, appointment_type, scheduled_at, status, created_at, expert_child_links ( link_id, parent_user_id, child_id, expert_id, children ( child_id, child_name ), expert_users ( expert_id, full_name, specialization, organization, contact_email, phone ) )')
-                .eq('appointment_id', appointment_id)
-                .single();
-
-            if (appointmentError || !appointment) {
-                return res.status(404).json({ message: 'Appointment not found', status: false });
-            }
-
-            if (role === 'parent' && appointment.expert_child_links?.parent_user_id !== user.id) {
-                return res.status(403).json({ message: 'Forbidden', status: false });
-            }
-
-            if (role === 'expert' && appointment.expert_child_links?.expert_id !== user.id) {
-                return res.status(403).json({ message: 'Forbidden', status: false });
-            }
-
-            const { data: records, error: recordsError } = await supabase
-                .from('appointment_records')
-                .select('record_id, notes, therapy_plan, medication, progress_feedback, created_at')
-                .eq('appointment_id', appointment_id)
-                .order('created_at', { ascending: false });
-
-            if (recordsError) {
-                return res.status(400).json({ message: 'Error fetching appointment details', error: recordsError.message, status: false });
-            }
-
-            res.status(200).json({
-                message: 'Appointment details fetched successfully',
-                data: { appointment, records },
-                status: true
-            });
-
-        } catch (error) {
-            res.status(500).json({ message: 'Error fetching appointment details', error: error.message, status: false });
-        }
-    }
-
-    static async addFeedback(req, res) {
-        try {
-            const supabase = req.supabase;
-            const { data: { user }, error: userError } = await supabase.auth.getUser();
-            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
-
-            const role = await getUserRole(supabase, user.id);
-            if (role !== 'expert') return res.status(403).json({ message: 'Forbidden', status: false });
-
-            const { id: appointment_id } = req.params;
-            const { progress_feedback } = req.body;
-
-            if (!progress_feedback) {
-                return res.status(400).json({ message: 'progress_feedback is required', status: false });
-            }
-
-            const { data: appointment, error: appointmentError } = await supabase
-                .from('appointments')
-                .select('appointment_id, link_id, expert_child_links ( expert_id )')
-                .eq('appointment_id', appointment_id)
-                .single();
-
-            if (appointmentError || !appointment) {
-                return res.status(404).json({ message: 'Appointment not found', status: false });
-            }
-
-            if (appointment.expert_child_links?.expert_id !== user.id) {
-                return res.status(403).json({ message: 'Forbidden', status: false });
-            }
-
-            const { data: existingRecord, error: existingError } = await supabase
-                .from('appointment_records')
-                .select('record_id')
-                .eq('appointment_id', appointment_id)
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-
-            if (existingError) {
-                return res.status(400).json({ message: 'Error checking appointment record', error: existingError.message, status: false });
-            }
-
-            let recordData = null;
-            if (existingRecord) {
-                const { data, error } = await supabase
-                    .from('appointment_records')
-                    .update({ progress_feedback })
-                    .eq('record_id', existingRecord.record_id)
-                    .select()
-                    .single();
-
-                if (error) {
-                    return res.status(400).json({ message: 'Error updating appointment feedback', error: error.message, status: false });
-                }
-                recordData = data;
-            } else {
-                const { data, error } = await supabase
-                    .from('appointment_records')
-                    .insert([{ appointment_id, progress_feedback }])
-                    .select()
-                    .single();
-
-                if (error) {
-                    return res.status(400).json({ message: 'Error creating appointment feedback', error: error.message, status: false });
-                }
-                recordData = data;
-            }
-
-            res.status(200).json({ message: 'Feedback saved successfully', data: recordData, status: true });
-
-        } catch (error) {
-            res.status(500).json({ message: 'Error saving feedback', error: error.message, status: false });
-        }
-    }
-
-    static async getParentFeedback(req, res) {
-        try {
-            const supabase = req.supabase;
-            const { data: { user }, error: userError } = await supabase.auth.getUser();
-            if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
-
-            const role = await getUserRole(supabase, user.id);
-            if (role !== 'parent') return res.status(403).json({ message: 'Forbidden', status: false });
-
-            const { data, error } = await supabase
-                .from('appointment_records')
-                .select('record_id, progress_feedback, created_at, appointments ( appointment_id, scheduled_at, appointment_type, status, expert_child_links ( link_id, parent_user_id, child_id, expert_id, children ( child_id, child_name ), expert_users ( expert_id, full_name, specialization, organization, contact_email, phone ) ) )')
-                .not('progress_feedback', 'is', null)
-                .eq('appointments.expert_child_links.parent_user_id', user.id)
-                .order('created_at', { ascending: false });
-
-            if (error) {
-                return res.status(400).json({ message: 'Error fetching feedback history', error: error.message, status: false });
-            }
-
-            res.status(200).json({ message: 'Feedback history fetched successfully', data, status: true });
-
-        } catch (error) {
-            res.status(500).json({ message: 'Error fetching feedback history', error: error.message, status: false });
+            return res.status(500).json({ success: false, message: 'Internal server error' });
         }
     }
 }
