@@ -180,16 +180,17 @@ export default class Location {
         try {
             const supabase = req.supabase;
             const auth = await getAuthContext(supabase);
+            const { expertId } = req.params;
 
             if (auth.error === 'Unauthorized') {
                 return res.status(401).json({ success: false, message: 'Unauthorized' });
             }
 
-            if (!['parent', 'admin'].includes(auth.role)) {
+            const isParentOrAdmin = ['parent', 'admin'].includes(auth.role);
+            const isSelfExpert = auth.role === 'expert' && auth.user.id === expertId;
+            if (!isParentOrAdmin && !isSelfExpert) {
                 return res.status(403).json({ success: false, message: 'Forbidden' });
             }
-
-            const { expertId } = req.params;
 
             const { data, error } = await supabase
                 .from('expert_locations')
