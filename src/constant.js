@@ -17,4 +17,10 @@ export default class Constants{
     static ZOOM_ACCOUNT_ID = process.env.ZOOM_ACCOUNT_ID;
     static ZOOM_CLIENT_ID = process.env.ZOOM_CLIENT_ID;
     static ZOOM_CLIENT_SECRET = process.env.ZOOM_CLIENT_SECRET;
+    static SAFEPAY_SECRET_KEY = process.env.SAFEPAY_SECRET_KEY;
+    static SAFEPAY_API_KEY = process.env.SAFEPAY_API_KEY;
+    static SAFEPAY_V1_SECRET = process.env.SAFEPAY_V1_SECRET || process.env.SAFEPAY_SECRET_KEY;
+    static SAFEPAY_WEBHOOK_SECRET = process.env.SAFEPAY_WEBHOOK_SECRET;
+    static SAFEPAY_REDIRECT_URL = process.env.SAFEPAY_REDIRECT_URL;
+    static SAFEPAY_CANCEL_URL = process.env.SAFEPAY_CANCEL_URL;
 }

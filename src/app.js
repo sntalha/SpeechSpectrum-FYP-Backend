@@ -15,11 +15,15 @@ import locationRoutes from './routes/location.route.js';
 import feedbackRoutes from './routes/feedback.routes.js';
 import expertRoutes from './routes/expert.routes.js';
 import chatRoutes from './routes/chat.routes.js';
+import paymentRoutes from './routes/payment.routes.js';
+import PaymentController from './controllers/payment.controller.js';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 // Per-request Supabase client is created via supabaseClientMiddleware in each route
+
+app.post('/api/payments/webhook', PaymentController.handleWebhook);
 
 app.get('/', (req, res) => {
   res.send('Hello, Supabase Connected.');
@@ -39,6 +43,7 @@ app.use('/api', appointmentRecordRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/experts', expertRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/payments', paymentRoutes);
 
 // Health check endpoint for Vercel
 app.get('/api/health', (req, res) => {

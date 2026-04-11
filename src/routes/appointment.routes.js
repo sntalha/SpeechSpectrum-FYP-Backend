@@ -14,6 +14,5 @@ router.patch('/appointments/:appointmentId/complete', Appointment.completeAppoin
 router.patch('/appointments/:appointmentId/cancel', Appointment.cancelAppointment);
 router.patch('/appointments/:appointmentId/no-show', Appointment.markNoShow);
 router.get('/appointments', Appointment.getAllAppointments);
-router.post('/appointments/generate-zoom-link', Appointment.generateZoomLink);
 
 export default router;

@@ -56,6 +56,10 @@ function canUseMode(slotMode, bookedMode) {
     return slotMode === 'both' || slotMode === bookedMode;
 }
 
+function shouldGenerateZoomMeeting(slotMode, bookedMode) {
+    return bookedMode === 'online' && (slotMode === 'online' || slotMode === 'both');
+}
+
 async function getAppointmentByIdWithRelations(supabase, appointmentId) {
     return supabase
         .from('appointments')
@@ -185,6 +189,8 @@ export default class Appointment {
                 return res.status(400).json({ success: false, message: 'Invalid slot duration' });
             }
 
+            const shouldCreateZoomLink = shouldGenerateZoomMeeting(slot.mode, normalizedMode);
+
             const { data: bookedSlot, error: updateSlotError } = await supabase
                 .from('appointment_slots')
                 .update({ status: 'booked' })
@@ -218,7 +224,7 @@ export default class Appointment {
                 return res.status(400).json({ success: false, message: 'Slot is no longer available' });
             }
 
-            const { data: appointment, error: insertAppointmentError } = await supabase
+            const { data: insertedAppointment, error: insertAppointmentError } = await supabase
                 .from('appointments')
                 .insert([
                     {
@@ -253,7 +259,53 @@ export default class Appointment {
                 return res.status(400).json({ success: false, message: insertAppointmentError.message });
             }
 
-            return res.status(201).json({ success: true, data: appointment });
+            let appointment = insertedAppointment;
+            let meetingDetails = null;
+            let zoomWarning = null;
+
+            if (shouldCreateZoomLink) {
+                try {
+                    meetingDetails = await ZoomService.createMeeting({
+                        topic: `SpeechSpectrum Appointment ${slot.slot_date} ${slot.start_time}`,
+                        start_time: scheduledAt,
+                        duration: durationMinutes,
+                        timezone: 'UTC'
+                    });
+
+                    const { data: updatedAppointment, error: updateMeetLinkError } = await supabase
+                        .from('appointments')
+                        .update({ meet_link: meetingDetails.join_url })
+                        .eq('appointment_id', insertedAppointment.appointment_id)
+                        .select()
+                        .single();
+
+                    if (updateMeetLinkError) {
+                        zoomWarning = 'Appointment booked, but failed to store Zoom link in the appointment record';
+                    } else {
+                        appointment = updatedAppointment;
+                    }
+                } catch (zoomError) {
+                    zoomWarning = 'Appointment booked, but failed to generate Zoom meeting link';
+                }
+            }
+
+            const responseData = meetingDetails
+                ? {
+                    ...appointment,
+                    zoom_details: {
+                        join_url: meetingDetails.join_url,
+                        meeting_id: meetingDetails.meeting_id,
+                        password: meetingDetails.password,
+                        start_url: meetingDetails.start_url
+                    }
+                }
+                : appointment;
+
+            if (zoomWarning) {
+                responseData.zoom_warning = zoomWarning;
+            }
+
+            return res.status(201).json({ success: true, data: responseData });
         } catch (error) {
             return res.status(500).json({ success: false, message: 'Internal server error' });
         }
@@ -638,47 +690,4 @@ export default class Appointment {
         }
     }
 
-    static async generateZoomLink(req, res) {
-        try {
-            const supabase = req.supabase;
-            const auth = await getAuthContext(supabase);
-
-            if (auth.error === 'Unauthorized') {
-                return res.status(401).json({ success: false, message: 'Unauthorized' });
-            }
-
-            if (auth.role !== 'expert') {
-                return res.status(403).json({ success: false, message: 'Forbidden' });
-            }
-
-            const { topic, start_time, duration, timezone } = req.body;
-
-            if (!topic || !start_time) {
-                return res.status(400).json({ success: false, message: 'topic and start_time are required' });
-            }
-
-            const parsedDate = new Date(start_time);
-            if (Number.isNaN(parsedDate.getTime())) {
-                return res.status(400).json({ success: false, message: 'Invalid start_time format' });
-            }
-
-            const meetingDetails = await ZoomService.createMeeting({
-                topic,
-                start_time,
-                duration: duration || 30,
-                timezone: timezone || 'UTC'
-            });
-
-            return res.status(200).json({
-                success: true,
-                data: {
-                    join_url: meetingDetails.join_url,
-                    meeting_id: meetingDetails.meeting_id,
-                    password: meetingDetails.password
-                }
-            });
-        } catch (error) {
-            return res.status(500).json({ success: false, message: 'Internal server error' });
-        }
-    }
 }
