@@ -87,7 +87,17 @@ export default class PaymentController {
                 return res.status(403).json({ message: 'Only parents can initiate payments', status: false });
             }
 
-            const { appointment_id } = req.body;
+            const { appointment_id, redirect_url, cancel_url } = req.body;
+
+            const redirectUrl =
+                typeof redirect_url === 'string' && redirect_url.trim()
+                    ? redirect_url.trim()
+                    : CHECKOUT_REDIRECT_URL;
+
+            const cancelUrl =
+                typeof cancel_url === 'string' && cancel_url.trim()
+                    ? cancel_url.trim()
+                    : CHECKOUT_CANCEL_URL;
 
             if (!appointment_id) {
                 return res.status(400).json({ message: 'appointment_id is required', status: false });
@@ -192,8 +202,8 @@ export default class PaymentController {
                 checkoutUrl = safepayClient.checkout.create({
                     token: trackerToken,
                     orderId: String(appointment_id),
-                    redirectUrl: CHECKOUT_REDIRECT_URL,
-                    cancelUrl: CHECKOUT_CANCEL_URL,
+                    redirectUrl,
+                    cancelUrl,
                     source: 'custom',
                     webhooks: true
                 });
