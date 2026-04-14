@@ -75,6 +75,7 @@ async function getAppointmentByIdWithRelations(supabase, appointmentId) {
             scheduled_at,
             duration_minutes,
             status,
+            payment_status,
             meet_link,
             cancelled_by,
             cancellation_reason,
@@ -237,7 +238,8 @@ export default class Appointment {
                         currency: slot.currency || 'PKR',
                         scheduled_at: scheduledAt,
                         duration_minutes: durationMinutes,
-                        status: 'scheduled'
+                        status: 'scheduled',
+                        payment_status: 'pending'
                     }
                 ])
                 .select()
@@ -338,6 +340,7 @@ export default class Appointment {
                     scheduled_at,
                     duration_minutes,
                     status,
+                    payment_status,
                     meet_link,
                     cancelled_by,
                     cancellation_reason,
@@ -423,7 +426,7 @@ export default class Appointment {
 
             const { data: appointment, error: appointmentError } = await supabase
                 .from('appointments')
-                .select('appointment_id, expert_id, status')
+                .select('appointment_id, expert_id, status, payment_status')
                 .eq('appointment_id', appointmentId)
                 .single();
 
@@ -443,9 +446,11 @@ export default class Appointment {
                 return res.status(400).json({ success: false, message: 'Cancelled appointment cannot be confirmed' });
             }
 
+            const nextPaymentStatus = appointment.payment_status === 'paid' ? 'paid' : 'pending';
+
             const { data, error } = await supabase
                 .from('appointments')
-                .update({ status: 'confirmed' })
+                .update({ status: 'confirmed', payment_status: nextPaymentStatus })
                 .eq('appointment_id', appointmentId)
                 .select()
                 .single();
@@ -668,6 +673,7 @@ export default class Appointment {
                     scheduled_at,
                     duration_minutes,
                     status,
+                    payment_status,
                     meet_link,
                     cancelled_by,
                     cancellation_reason,

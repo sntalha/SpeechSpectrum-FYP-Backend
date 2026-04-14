@@ -4,11 +4,13 @@ async function getAuthContext(supabase) {
         return { error: 'Unauthorized' };
     }
 
-    const { data: profile, error: roleError } = await supabase
+    const { data: profiles, error: roleError } = await supabase
         .from('profiles')
         .select('role')
         .eq('user_id', authData.user.id)
-        .single();
+        .limit(1);
+
+    const profile = Array.isArray(profiles) ? profiles[0] : null;
 
     if (roleError || !profile?.role) {
         return { error: 'Forbidden' };
@@ -71,22 +73,24 @@ export default class Slot {
             }
 
             if (location_id) {
-                const { data: location, error: locationError } = await supabase
+                const { data: locations, error: locationError } = await supabase
                     .from('expert_locations')
-                    .select('location_id, expert_id, is_active')
+                    .select('location_id')
                     .eq('location_id', location_id)
-                    .single();
+                    .eq('expert_id', auth.user.id)
+                    .eq('is_active', true)
+                    .limit(1);
 
                 if (locationError) {
                     return res.status(400).json({ success: false, message: locationError.message });
                 }
 
-                if (!location || location.expert_id !== auth.user.id || !location.is_active) {
+                if (!locations?.length) {
                     return res.status(400).json({ success: false, message: 'Invalid location_id for this expert' });
                 }
             }
 
-            const { data, error } = await supabase
+            const { data: insertedSlots, error } = await supabase
                 .from('appointment_slots')
                 .insert([
                     {
@@ -104,12 +108,15 @@ export default class Slot {
                         recurrence_rule: recurrence_rule || null
                     }
                 ])
-                .select()
-                .single();
+                .select();
 
             if (error) {
                 return res.status(400).json({ success: false, message: error.message });
             }
+
+            const data = Array.isArray(insertedSlots) && insertedSlots.length === 1
+                ? insertedSlots[0]
+                : insertedSlots;
 
             return res.status(201).json({ success: true, data });
         } catch (error) {
@@ -251,17 +258,19 @@ export default class Slot {
                 if (location_id === null) {
                     updates.location_id = null;
                 } else {
-                    const { data: location, error: locationError } = await supabase
+                    const { data: locations, error: locationError } = await supabase
                         .from('expert_locations')
-                        .select('location_id, expert_id, is_active')
+                        .select('location_id')
                         .eq('location_id', location_id)
-                        .single();
+                        .eq('expert_id', auth.user.id)
+                        .eq('is_active', true)
+                        .limit(1);
 
                     if (locationError) {
                         return res.status(400).json({ success: false, message: locationError.message });
                     }
 
-                    if (!location || location.expert_id !== auth.user.id || !location.is_active) {
+                    if (!locations?.length) {
                         return res.status(400).json({ success: false, message: 'Invalid location_id for this expert' });
                     }
 

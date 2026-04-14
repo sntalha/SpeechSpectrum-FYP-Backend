@@ -372,7 +372,7 @@ export default class PaymentController {
             if (payment.status === 'paid') {
                 const { error: updateAppointmentError } = await supabase
                     .from('appointments')
-                    .update({ status: 'confirmed', updated_at: getNowIso() })
+                    .update({ status: 'confirmed', payment_status: 'paid', updated_at: getNowIso() })
                     .eq('appointment_id', payment.appointment_id);
 
                 if (updateAppointmentError) {
@@ -498,7 +498,7 @@ export default class PaymentController {
 
                 const { error: updateAppointmentError } = await supabase
                     .from('appointments')
-                    .update({ status: 'confirmed', updated_at: now })
+                    .update({ status: 'confirmed', payment_status: 'paid', updated_at: now })
                     .eq('appointment_id', payment.appointment_id);
 
                 if (updateAppointmentError) {
