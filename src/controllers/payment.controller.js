@@ -1,8 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
 import Constants from '../constant.js';
 import safepayClient, {
     CHECKOUT_REDIRECT_URL,
-    CHECKOUT_CANCEL_URL
+    CHECKOUT_CANCEL_URL,
+    SAFEPAY_WEBHOOK_SECRET
 } from '../config/safepay-config.js';
 
 /*
@@ -18,38 +20,34 @@ function getNowIso() {
     return new Date().toISOString();
 }
 
+function normalizeCallbackUrl(value) {
+    if (typeof value !== 'string') {
+        return null;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+    try {
+        const parsed = new URL(candidate);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            return null;
+        }
+
+        return parsed.toString();
+    } catch (error) {
+        return null;
+    }
+}
+
 function resolveTrackerToken(paymentResponse) {
     return (
         paymentResponse?.token ||
         paymentResponse?.data?.token ||
-        null
-    );
-}
-
-function extractTrackerFromWebhook(payload) {
-    return (
-        payload?.data?.token ||
-        payload?.token ||
-        payload?.data?.beacon ||
-        payload?.beacon ||
-        payload?.data?.tracker_token ||
-        payload?.tracker_token ||
-        payload?.data?.tracker?.token ||
-        payload?.data?.tracker ||
-        payload?.tracker?.token ||
-        payload?.tracker ||
-        payload?.data?.payment?.tracker?.token ||
-        payload?.data?.payment?.tracker ||
-        null
-    );
-}
-
-function extractReferenceFromWebhook(payload) {
-    return (
-        payload?.data?.reference ||
-        payload?.data?.payment?.reference ||
-        payload?.data?.payment?.id ||
-        payload?.reference ||
         null
     );
 }
@@ -89,15 +87,25 @@ export default class PaymentController {
 
             const { appointment_id, redirect_url, cancel_url } = req.body;
 
-            const redirectUrl =
+            const redirectUrlInput =
                 typeof redirect_url === 'string' && redirect_url.trim()
                     ? redirect_url.trim()
                     : CHECKOUT_REDIRECT_URL;
 
-            const cancelUrl =
+            const cancelUrlInput =
                 typeof cancel_url === 'string' && cancel_url.trim()
                     ? cancel_url.trim()
                     : CHECKOUT_CANCEL_URL;
+
+            const redirectUrl = normalizeCallbackUrl(redirectUrlInput);
+            const cancelUrl = normalizeCallbackUrl(cancelUrlInput);
+
+            if (!redirectUrl || !cancelUrl) {
+                return res.status(400).json({
+                    message: 'redirect_url and cancel_url must be valid absolute HTTP(S) URLs',
+                    status: false
+                });
+            }
 
             if (!appointment_id) {
                 return res.status(400).json({ message: 'appointment_id is required', status: false });
@@ -105,7 +113,7 @@ export default class PaymentController {
 
             const { data: appointment, error: appointmentError } = await supabase
                 .from('appointments')
-                .select('appointment_id, parent_id, status, currency, fee_charged')
+                .select('appointment_id, parent_id, status, payment_status, currency, fee_charged')
                 .eq('appointment_id', appointment_id)
                 .maybeSingle();
 
@@ -125,9 +133,16 @@ export default class PaymentController {
                 return res.status(403).json({ message: 'Forbidden', status: false });
             }
 
-            if (appointment.status !== 'scheduled') {
+            if (appointment.status !== 'confirmed') {
                 return res.status(400).json({
-                    message: 'Only scheduled appointments can be paid',
+                    message: 'Only confirmed appointments can be paid',
+                    status: false
+                });
+            }
+
+            if (appointment.payment_status === 'paid') {
+                return res.status(400).json({
+                    message: 'Payment already completed for this appointment',
                     status: false
                 });
             }
@@ -372,12 +387,12 @@ export default class PaymentController {
             if (payment.status === 'paid') {
                 const { error: updateAppointmentError } = await supabase
                     .from('appointments')
-                    .update({ status: 'confirmed', payment_status: 'paid', updated_at: getNowIso() })
+                    .update({ payment_status: 'paid', updated_at: getNowIso() })
                     .eq('appointment_id', payment.appointment_id);
 
                 if (updateAppointmentError) {
                     return res.status(400).json({
-                        message: 'Failed to update appointment status',
+                        message: 'Failed to update appointment payment status',
                         error: updateAppointmentError.message,
                         status: false
                     });
@@ -417,27 +432,82 @@ export default class PaymentController {
         res.status(200).json({ received: true });
 
         try {
-            const isValidSignature = safepayClient.verify.webhook(req);
-            console.log('Signature valid:', isValidSignature);
-            console.log('x-sfpy-signature header:', req.headers['x-sfpy-signature']);
-            console.log('body.data:', req.body?.data);
-            console.log('Expected HMAC input:', JSON.stringify(req.body?.data));
+            const signatureHeader = req.headers['x-sfpy-signature'];
+            const signature = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
 
-            if (!isValidSignature) {
+            if (!signature || !SAFEPAY_WEBHOOK_SECRET) {
+                console.warn('Safepay webhook missing signature or secret not configured');
+                return;
+            }
+
+            const rawBodyStr = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body);
+
+            // Detect webhook format version.
+            // v2 format has top-level `version`.
+            // v1 format keeps event details nested under `data`.
+            const isV2Format = !!req.body?.version;
+
+            let rawData;
+            if (isV2Format) {
+                // v2 test notifications: signature covers the full body.
+                rawData = Buffer.from(rawBodyStr);
+            } else {
+                // v1 real payments: signature covers only `body.data`.
+                const parsedRaw = JSON.parse(rawBodyStr);
+                rawData = Buffer.from(JSON.stringify(parsedRaw.data));
+            }
+
+            const expectedSig = crypto
+                .createHmac('sha512', SAFEPAY_WEBHOOK_SECRET)
+                .update(rawData)
+                .digest('hex');
+
+            console.log('Webhook format:', isV2Format ? 'v2 (test)' : 'v1 (real payment)');
+            console.log('Received sig:', signature);
+            console.log('Expected sig:', expectedSig);
+            console.log('Signature valid:', expectedSig === signature);
+
+            if (expectedSig !== signature) {
                 console.warn('Safepay webhook signature invalid');
                 return;
             }
 
-            const eventTypeRaw = req.body?.type || req.body?.event || req.body?.data?.event;
-            const statusRaw = String(req.body?.data?.status || req.body?.status || '').toLowerCase();
-            let eventType = typeof eventTypeRaw === 'string' ? eventTypeRaw.toLowerCase() : null;
+            const isV2 = !!req.body?.version;
 
-            if (!eventType && ['paid', 'success', 'succeeded'].includes(statusRaw)) {
-                eventType = 'payment.succeeded';
-            }
+            let eventType;
+            let trackerToken;
+            let safepayReference;
 
-            if (!eventType && ['failed', 'failure', 'declined', 'cancelled', 'canceled'].includes(statusRaw)) {
-                eventType = 'payment.failed';
+            if (isV2) {
+                eventType = typeof req.body?.type === 'string' ? req.body.type.toLowerCase() : null;
+                trackerToken = req.body?.data?.tracker || req.body?.data?.token || null;
+                safepayReference =
+                    req.body?.data?.reference ||
+                    req.body?.data?.payment?.reference ||
+                    req.body?.data?.payment?.id ||
+                    null;
+            } else {
+                const eventTypeRaw = req.body?.data?.type || '';
+                const state = String(req.body?.data?.notification?.state || '').toUpperCase();
+
+                if (state === 'PAID') {
+                    eventType = 'payment.succeeded';
+                } else if (['FAILED', 'DECLINED', 'CANCELLED', 'CANCELED'].includes(state)) {
+                    eventType = 'payment.failed';
+                } else {
+                    eventType = typeof eventTypeRaw === 'string' ? eventTypeRaw.toLowerCase() : null;
+                }
+
+                trackerToken =
+                    req.body?.data?.notification?.tracker ||
+                    req.body?.data?.tracker ||
+                    req.body?.data?.token ||
+                    null;
+
+                safepayReference =
+                    req.body?.data?.notification?.reference ||
+                    req.body?.data?.reference ||
+                    null;
             }
 
             if (!eventType) {
@@ -445,13 +515,10 @@ export default class PaymentController {
                 return;
             }
 
-            const trackerToken = extractTrackerFromWebhook(req.body);
             const supabase = getWebhookSupabaseClient();
             const now = getNowIso();
 
             if (eventType === 'payment.succeeded') {
-                const safepayReference = extractReferenceFromWebhook(req.body);
-
                 if (!trackerToken) {
                     console.warn('Safepay payment.succeeded webhook missing tracker token');
                     return;
@@ -498,7 +565,7 @@ export default class PaymentController {
 
                 const { error: updateAppointmentError } = await supabase
                     .from('appointments')
-                    .update({ status: 'confirmed', payment_status: 'paid', updated_at: now })
+                    .update({ payment_status: 'paid', updated_at: now })
                     .eq('appointment_id', payment.appointment_id);
 
                 if (updateAppointmentError) {

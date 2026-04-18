@@ -20,7 +20,11 @@ import PaymentController from './controllers/payment.controller.js';
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 // Per-request Supabase client is created via supabaseClientMiddleware in each route
 
 app.post('/api/payments/webhook', PaymentController.handleWebhook);
