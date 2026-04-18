@@ -429,7 +429,6 @@ export default class PaymentController {
     static async handleWebhook(req, res) {
         console.log('WEBHOOK headers:', JSON.stringify(req.headers, null, 2));
         console.log('WEBHOOK body:', JSON.stringify(req.body, null, 2));
-        res.status(200).json({ received: true });
 
         try {
             const signatureHeader = req.headers['x-sfpy-signature'];
@@ -613,6 +612,10 @@ export default class PaymentController {
             }
         } catch (error) {
             console.error('handleWebhook error:', error);
+        } finally {
+            if (!res.headersSent) {
+                res.status(200).json({ received: true });
+            }
         }
     }
 
