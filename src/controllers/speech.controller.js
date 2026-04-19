@@ -66,6 +66,10 @@ export default class Speech {
                 });
             }
 
+            let predictionResult = null;
+            let speechResultData = null;
+            let predictionErrorMessage = null;
+
             try {
                 const audioFileUrl = req.file.path || req.file.secure_url;
 
@@ -99,7 +103,7 @@ export default class Speech {
                     while (retries > 0) {
                         try {
                             predictionResponse = await axios.post(
-                                'https://asd-speechanalysis.onrender.com/predict',
+                                'https://server4-speech.vercel.app/predict',
                                 formData,
                                 {
                                     headers: {
@@ -128,10 +132,10 @@ export default class Speech {
                         throw lastError;
                     }
 
-                    const predictionResult = predictionResponse.data;
+                    predictionResult = predictionResponse.data;
                     console.log('Prediction result:', predictionResult);
 
-                    const { error: speechResultError } = await supabase
+                    const { data: storedSpeechResult, error: speechResultError } = await supabase
                         .from('speech_results')
                         .insert([
                             {
@@ -140,14 +144,19 @@ export default class Speech {
                                 child_id,
                                 result: predictionResult
                             }
-                        ]);
+                        ])
+                        .select()
+                        .single();
 
                     if (speechResultError) {
                         console.error('Failed to store speech prediction result:', speechResultError.message);
+                    } else {
+                        speechResultData = storedSpeechResult;
                     }
                 }
             } catch (predictionError) {
                 console.error('Speech prediction failed:', predictionError.message);
+                predictionErrorMessage = predictionError.message;
                 if (predictionError.response) {
                     console.error('Response status:', predictionError.response.status);
                     console.error('Response data:', predictionError.response.data);
@@ -162,7 +171,12 @@ export default class Speech {
 
             res.status(201).json({
                 message: 'Speech submission created successfully',
-                data: submissionData,
+                data: {
+                    ...submissionData,
+                    prediction_result: predictionResult,
+                    speech_result: speechResultData
+                },
+                prediction_error: predictionErrorMessage,
                 status: true
             });
 
