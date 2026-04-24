@@ -1,4 +1,14 @@
 import ZoomService from '../utils/zoom-service.js';
+import { expireUnpaidConfirmedAppointments } from '../utils/appointment-payment-expiry.js';
+import {
+    notifyAppointmentCancelled,
+    notifyAppointmentCompleted,
+    notifyAppointmentNoShow,
+    notifyExpertNewAppointment,
+    notifyParentAppointmentConfirmed,
+    scheduleAppointmentReminders,
+    schedulePaymentReminders
+} from '../services/notification-events.service.js';
 
 async function getAuthContext(supabase) {
     const { data: authData, error: userError } = await supabase.auth.getUser();
@@ -126,6 +136,13 @@ export default class Appointment {
 
             if (auth.role !== 'parent') {
                 return res.status(403).json({ success: false, message: 'Forbidden' });
+            }
+
+            try {
+                await expireUnpaidConfirmedAppointments();
+            } catch (expiryError) {
+                console.error('Failed to expire unpaid confirmed appointments in bookAppointment:', expiryError);
+                return res.status(500).json({ success: false, message: 'Failed to validate appointment availability' });
             }
 
             const { slot_id, child_id, booked_mode } = req.body;
@@ -307,6 +324,10 @@ export default class Appointment {
                 responseData.zoom_warning = zoomWarning;
             }
 
+            notifyExpertNewAppointment(responseData).catch((error) => {
+                console.error('notifyExpertNewAppointment failed:', error?.message || error);
+            });
+
             return res.status(201).json({ success: true, data: responseData });
         } catch (error) {
             return res.status(500).json({ success: false, message: 'Internal server error' });
@@ -363,6 +384,16 @@ export default class Appointment {
             if (error) {
                 return res.status(400).json({ success: false, message: error.message });
             }
+
+            notifyParentAppointmentConfirmed(data).catch((notifyError) => {
+                console.error('notifyParentAppointmentConfirmed failed:', notifyError?.message || notifyError);
+            });
+            schedulePaymentReminders(data).catch((scheduleError) => {
+                console.error('schedulePaymentReminders failed:', scheduleError?.message || scheduleError);
+            });
+            scheduleAppointmentReminders(data, [data.parent_id, data.expert_id]).catch((scheduleError) => {
+                console.error('scheduleAppointmentReminders failed:', scheduleError?.message || scheduleError);
+            });
 
             return res.status(200).json({ success: true, data });
         } catch (error) {
@@ -447,10 +478,18 @@ export default class Appointment {
             }
 
             const nextPaymentStatus = appointment.payment_status === 'paid' ? 'paid' : 'pending';
+            const updates = {
+                status: 'confirmed',
+                payment_status: nextPaymentStatus
+            };
+
+            if (appointment.status !== 'confirmed') {
+                updates.updated_at = new Date().toISOString();
+            }
 
             const { data, error } = await supabase
                 .from('appointments')
-                .update({ status: 'confirmed', payment_status: nextPaymentStatus })
+                .update(updates)
                 .eq('appointment_id', appointmentId)
                 .select()
                 .single();
@@ -458,6 +497,10 @@ export default class Appointment {
             if (error) {
                 return res.status(400).json({ success: false, message: error.message });
             }
+
+            notifyAppointmentCompleted(data).catch((notifyError) => {
+                console.error('notifyAppointmentCompleted failed:', notifyError?.message || notifyError);
+            });
 
             return res.status(200).json({ success: true, data });
         } catch (error) {
@@ -586,6 +629,10 @@ export default class Appointment {
                 return res.status(400).json({ success: false, message: revertSlotError.message });
             }
 
+            notifyAppointmentCancelled(data, auth.role).catch((notifyError) => {
+                console.error('notifyAppointmentCancelled failed:', notifyError?.message || notifyError);
+            });
+
             return res.status(200).json({ success: true, data });
         } catch (error) {
             return res.status(500).json({ success: false, message: 'Internal server error' });
@@ -639,6 +686,10 @@ export default class Appointment {
             if (error) {
                 return res.status(400).json({ success: false, message: error.message });
             }
+
+            notifyAppointmentNoShow(data).catch((notifyError) => {
+                console.error('notifyAppointmentNoShow failed:', notifyError?.message || notifyError);
+            });
 
             return res.status(200).json({ success: true, data });
         } catch (error) {

@@ -1,3 +1,5 @@
+import { sendNotification } from '../services/notification.service.js';
+
 async function getAuthContext(supabase) {
     const { data: authData, error: userError } = await supabase.auth.getUser();
     if (userError || !authData?.user) {
@@ -80,6 +82,19 @@ export default class AppointmentRecord {
             if (error) {
                 return res.status(400).json({ success: false, message: error.message });
             }
+
+            sendNotification({
+                recipientUserId: appointment.parent_id,
+                eventType: 'record.created',
+                title: 'New consultation record',
+                body: 'Your expert added a new consultation record and plan.',
+                entityType: 'record',
+                entityId: data.record_id || null,
+                deepLink: `speechspectrum://appointments/${appointmentId}/records`,
+                webPath: `/appointments/${appointmentId}/records`
+            }).catch((notifyError) => {
+                console.error('sendNotification(record.created) failed:', notifyError?.message || notifyError);
+            });
 
             return res.status(201).json({ success: true, data });
         } catch (error) {
@@ -190,6 +205,19 @@ export default class AppointmentRecord {
             if (!data) {
                 return res.status(404).json({ success: false, message: 'Record not found' });
             }
+
+            sendNotification({
+                recipientUserId: appointment.parent_id,
+                eventType: 'record.updated',
+                title: 'Consultation record updated',
+                body: 'Your expert updated your consultation record.',
+                entityType: 'record',
+                entityId: data.record_id || null,
+                deepLink: `speechspectrum://appointments/${appointmentId}/records`,
+                webPath: `/appointments/${appointmentId}/records`
+            }).catch((notifyError) => {
+                console.error('sendNotification(record.updated) failed:', notifyError?.message || notifyError);
+            });
 
             return res.status(200).json({ success: true, data });
         } catch (error) {

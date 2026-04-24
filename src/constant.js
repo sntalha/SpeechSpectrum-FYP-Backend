@@ -23,4 +23,9 @@ export default class Constants{
     static SAFEPAY_WEBHOOK_SECRET = process.env.SAFEPAY_WEBHOOK_SECRET;
     static SAFEPAY_REDIRECT_URL = process.env.SAFEPAY_REDIRECT_URL;
     static SAFEPAY_CANCEL_URL = process.env.SAFEPAY_CANCEL_URL;
+    static FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
+    static FIREBASE_CLIENT_EMAIL = process.env.FIREBASE_CLIENT_EMAIL;
+    static FIREBASE_PRIVATE_KEY = process.env.FIREBASE_PRIVATE_KEY;
+    static FIREBASE_SERVICE_ACCOUNT_JSON = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+    static CRON_SECRET = process.env.CRON_SECRET;
 }

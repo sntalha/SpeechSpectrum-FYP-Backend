@@ -1,3 +1,5 @@
+import { sendNotification } from '../services/notification.service.js';
+
 async function getUserRole(supabase, userId) {
     const { data, error } = await supabase
         .from('profiles')
@@ -126,6 +128,19 @@ export default class Admin {
                 status: true
             });
 
+            sendNotification({
+                recipientUserId: expert_id,
+                eventType: 'expert.approved',
+                title: 'Profile approved',
+                body: 'Your expert profile has been approved. You can now accept appointments.',
+                entityType: 'expert_account',
+                entityId: null,
+                deepLink: 'speechspectrum://expert/dashboard',
+                webPath: '/expert/dashboard'
+            }).catch((notifyError) => {
+                console.error('sendNotification(expert.approved) failed:', notifyError?.message || notifyError);
+            });
+
         } catch (error) {
             console.error('Approve expert error:', error);
             res.status(500).json({ message: 'Error approving expert', error: error.message });
@@ -172,6 +187,21 @@ export default class Admin {
                 message: 'Expert rejected successfully',
                 reason: reason || null,
                 status: true
+            });
+
+            sendNotification({
+                recipientUserId: expert_id,
+                eventType: 'expert.rejected',
+                title: 'Profile rejected',
+                body: reason
+                    ? `Your expert profile was rejected. Reason: ${reason}`
+                    : 'Your expert profile was rejected. Please contact support for details.',
+                entityType: 'expert_account',
+                entityId: null,
+                deepLink: 'speechspectrum://expert/profile',
+                webPath: '/expert/profile'
+            }).catch((notifyError) => {
+                console.error('sendNotification(expert.rejected) failed:', notifyError?.message || notifyError);
             });
 
         } catch (error) {

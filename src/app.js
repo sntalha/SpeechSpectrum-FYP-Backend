@@ -5,6 +5,7 @@ import testRoutes from './routes/test.routes.js';
 import userRoutes from './routes/user.routes.js';
 import adminRoutes from './routes/admin.routes.js';
 import childRoutes from './routes/child.routes.js';
+import childHealthProfileRoutes from './routes/childHealthProfile.routes.js';
 import questionnaireRoutes from './routes/questionnaire.routes.js';
 import speechRoutes from './routes/speech.routes.js';
 import storageRoutes from './routes/storage.routes.js';
@@ -16,9 +17,12 @@ import feedbackRoutes from './routes/feedback.routes.js';
 import expertRoutes from './routes/expert.routes.js';
 import chatRoutes from './routes/chat.routes.js';
 import paymentRoutes from './routes/payment.routes.js';
+import notificationRoutes from './routes/notification.routes.js';
 import PaymentController from './controllers/payment.controller.js';
+import { initializeFirebaseAdmin } from './services/firebase.service.js';
 
 const app = express();
+initializeFirebaseAdmin();
 app.use(cors());
 app.use(express.json({
   verify: (req, res, buf) => {
@@ -37,6 +41,7 @@ app.use('/api/test', testRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/children', childRoutes);
+app.use('/api/children', childHealthProfileRoutes);
 app.use('/api/questionnaire', questionnaireRoutes);
 app.use('/api/speech', speechRoutes);
 app.use('/api/storage', storageRoutes);
@@ -48,6 +53,7 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/experts', expertRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Health check endpoint for Vercel
 app.get('/api/health', (req, res) => {

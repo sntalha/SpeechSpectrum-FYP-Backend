@@ -1,4 +1,5 @@
 import Constants from '../constant.js';
+import { sendNotification } from '../services/notification.service.js';
 
 export default class QuestionnaireSubmission {
     static async createSubmission(req, res) {
@@ -122,6 +123,19 @@ export default class QuestionnaireSubmission {
             }
 
             // Success: return both submission and result
+            sendNotification({
+                recipientUserId: parent_user_id,
+                eventType: 'assessment.questionnaire_result_ready',
+                title: 'Questionnaire result ready',
+                body: 'Your child questionnaire assessment result is now available.',
+                entityType: 'assessment',
+                entityId: submissionData.submission_id,
+                deepLink: `speechspectrum://assessments/questionnaire/${submissionData.submission_id}`,
+                webPath: `/assessments/questionnaire/${submissionData.submission_id}`
+            }).catch((notifyError) => {
+                console.error('sendNotification(questionnaire_result_ready) failed:', notifyError?.message || notifyError);
+            });
+
             res.status(201).json({
                 message: "Questionnaire submitted and prediction stored successfully",
                 submission: submissionData,

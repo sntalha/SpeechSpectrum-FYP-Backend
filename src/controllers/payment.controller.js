@@ -6,10 +6,12 @@ import safepayClient, {
     CHECKOUT_CANCEL_URL,
     SAFEPAY_WEBHOOK_SECRET
 } from '../config/safepay-config.js';
+import { expireUnpaidConfirmedAppointments as runUnpaidConfirmedAppointmentExpiry } from '../utils/appointment-payment-expiry.js';
+import { notifyPaymentStatus } from '../services/notification-events.service.js';
 
 /*
   Safepay payment flow used in this controller:
-  1) Parent starts payment for a scheduled appointment (PKR only)
+    1) Parent starts payment for a confirmed appointment (PKR only)
   2) Backend creates Safepay payment token
   3) Backend builds hosted checkout URL and stores/updates a pending payment row
   4) Frontend verifies tracker after redirect to finalize state updates
@@ -58,9 +60,46 @@ function getWebhookSupabaseClient() {
 }
 
 export default class PaymentController {
+    static async expireUnpaidConfirmedAppointments(req, res) {
+        try {
+            const configuredCronSecret = process.env.CRON_SECRET;
+            const authHeader = req.headers.authorization;
+
+            if (configuredCronSecret && authHeader !== `Bearer ${configuredCronSecret}`) {
+                return res.status(401).json({ status: false, message: 'Unauthorized' });
+            }
+
+            const result = await runUnpaidConfirmedAppointmentExpiry();
+
+            return res.status(200).json({
+                status: true,
+                message: 'Expired unpaid confirmed appointments processed',
+                data: result
+            });
+        } catch (error) {
+            console.error('expireUnpaidConfirmedAppointments error:', error);
+            return res.status(500).json({
+                status: false,
+                message: 'Failed to expire unpaid confirmed appointments',
+                error: error.message
+            });
+        }
+    }
+
     static async initiatePayment(req, res) {
         try {
             const supabase = req.supabase;
+
+            try {
+                await runUnpaidConfirmedAppointmentExpiry();
+            } catch (expiryError) {
+                console.error('Failed to expire unpaid confirmed appointments in initiatePayment:', expiryError);
+                return res.status(500).json({
+                    message: 'Failed to validate payment window',
+                    error: expiryError.message,
+                    status: false
+                });
+            }
 
             const {
                 data: { user },
@@ -398,6 +437,15 @@ export default class PaymentController {
                     });
                 }
 
+                notifyPaymentStatus(
+                    payment.appointment_id,
+                    'payment.succeeded',
+                    'Payment successful',
+                    'Your appointment payment has been completed successfully.'
+                ).catch((notifyError) => {
+                    console.error('notifyPaymentStatus(payment.succeeded) failed:', notifyError?.message || notifyError);
+                });
+
                 return res.status(200).json({
                     status: true,
                     payment_status: 'paid',
@@ -406,6 +454,15 @@ export default class PaymentController {
             }
 
             if (payment.status === 'cancelled' || payment.status === 'failed') {
+                notifyPaymentStatus(
+                    payment.appointment_id,
+                    'payment.failed',
+                    'Payment failed',
+                    'Your payment did not complete. Please retry before the deadline.'
+                ).catch((notifyError) => {
+                    console.error('notifyPaymentStatus(payment.failed) failed:', notifyError?.message || notifyError);
+                });
+
                 return res.status(200).json({
                     status: true,
                     payment_status: 'cancelled'
@@ -572,6 +629,15 @@ export default class PaymentController {
                     return;
                 }
 
+                notifyPaymentStatus(
+                    payment.appointment_id,
+                    'payment.succeeded',
+                    'Payment successful',
+                    'Your appointment payment has been completed successfully.'
+                ).catch((notifyError) => {
+                    console.error('notifyPaymentStatus(webhook payment.succeeded) failed:', notifyError?.message || notifyError);
+                });
+
                 console.info(`Safepay payment confirmed via webhook for tracker ${trackerToken}`);
                 return;
             }
@@ -606,6 +672,23 @@ export default class PaymentController {
                 if (updatePaymentError) {
                     console.error('Failed to mark payment failed from webhook:', updatePaymentError);
                     return;
+                }
+
+                const { data: appointmentForFailed } = await supabase
+                    .from('payments')
+                    .select('appointment_id')
+                    .eq('payment_id', payment.payment_id)
+                    .maybeSingle();
+
+                if (appointmentForFailed?.appointment_id) {
+                    notifyPaymentStatus(
+                        appointmentForFailed.appointment_id,
+                        'payment.failed',
+                        'Payment failed',
+                        'Your payment did not complete. Please retry before the deadline.'
+                    ).catch((notifyError) => {
+                        console.error('notifyPaymentStatus(webhook payment.failed) failed:', notifyError?.message || notifyError);
+                    });
                 }
 
                 console.error(`Safepay payment failed via webhook for tracker ${trackerToken}`);

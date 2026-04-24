@@ -2,6 +2,7 @@ import Constants from '../constant.js';
 import { cloudinary } from '../config/cloudinary-config.js';
 import axios from 'axios';
 import FormData from 'form-data';
+import { sendNotification } from '../services/notification.service.js';
 
 export default class Speech {
     static async createSubmission(req, res) {
@@ -179,6 +180,21 @@ export default class Speech {
                 prediction_error: predictionErrorMessage,
                 status: true
             });
+
+            if (speechResultData) {
+                sendNotification({
+                    recipientUserId: parent_user_id,
+                    eventType: 'assessment.speech_result_ready',
+                    title: 'Speech assessment result ready',
+                    body: 'Your speech assessment result is now available.',
+                    entityType: 'assessment',
+                    entityId: submissionData.speech_submission_id,
+                    deepLink: `speechspectrum://assessments/speech/${submissionData.speech_submission_id}`,
+                    webPath: `/assessments/speech/${submissionData.speech_submission_id}`
+                }).catch((notifyError) => {
+                    console.error('sendNotification(speech_result_ready) failed:', notifyError?.message || notifyError);
+                });
+            }
 
         } catch (error) {
             // Clean up uploaded file on error
