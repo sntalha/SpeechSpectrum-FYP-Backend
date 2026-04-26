@@ -1,16 +1,6 @@
 {
   "version": 2,
   "installCommand": "npm install --legacy-peer-deps",
-  "crons": [
-    {
-      "path": "/api/payments/expire-unpaid-confirmed",
-      "schedule": "*/15 * * * *"
-    },
-    {
-      "path": "/api/notifications/process-scheduled",
-      "schedule": "*/5 * * * *"
-    }
-  ],
   "routes": [
     {
       "src": "/(.*)",
