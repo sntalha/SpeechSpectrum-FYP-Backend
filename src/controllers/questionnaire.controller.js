@@ -1,6 +1,46 @@
 import Constants from '../constant.js';
 import { sendNotification } from '../services/notification.service.js';
 
+const EXPERT_CHILD_ACCESS_STATUSES = ['scheduled', 'confirmed'];
+
+async function getRoleForUser(supabase, userId) {
+    return supabase
+        .from('profiles')
+        .select('role')
+        .eq('user_id', userId)
+        .maybeSingle();
+}
+
+async function getExpertAccessibleChildIds(supabase, expertId) {
+    const { data, error } = await supabase
+        .from('appointments')
+        .select('child_id')
+        .eq('expert_id', expertId)
+        .in('status', EXPERT_CHILD_ACCESS_STATUSES);
+
+    if (error) {
+        return { childIds: [], error };
+    }
+
+    return {
+        childIds: [...new Set((data || []).map((row) => row.child_id).filter(Boolean))],
+        error: null
+    };
+}
+
+async function canExpertAccessChild(supabase, expertId, childId) {
+    const { data, error } = await supabase
+        .from('appointments')
+        .select('appointment_id')
+        .eq('expert_id', expertId)
+        .eq('child_id', childId)
+        .in('status', EXPERT_CHILD_ACCESS_STATUSES)
+        .limit(1)
+        .maybeSingle();
+
+    return { allowed: !!data, error };
+}
+
 export default class QuestionnaireSubmission {
     static async createSubmission(req, res) {
         try {
@@ -158,17 +198,50 @@ export default class QuestionnaireSubmission {
             const { data: { user }, error: userError } = await supabase.auth.getUser();
             if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
 
-            const parent_user_id = user.id;
+            const { data: profile, error: roleError } = await getRoleForUser(supabase, user.id);
+            if (roleError || !profile?.role) return res.status(403).json({ message: 'Forbidden', status: false });
+
             const { child_id } = req.query;
 
             let query = supabase
                 .from('questionnaire_submissions')
                 // Select submission fields and include child name and linked results
-                .select('*, children(child_name), questionnaire_results(*)')
-                .eq('parent_user_id', parent_user_id);
+                .select('*, children(child_name), questionnaire_results(*)');
 
-            if (child_id) {
-                query = query.eq('child_id', child_id);
+            if (profile.role === 'parent') {
+                query = query.eq('parent_user_id', user.id);
+                if (child_id) {
+                    query = query.eq('child_id', child_id);
+                }
+            } else if (profile.role === 'expert') {
+                const { childIds, error: childIdsError } = await getExpertAccessibleChildIds(supabase, user.id);
+
+                if (childIdsError) {
+                    return res.status(400).json({
+                        message: 'Error fetching submissions',
+                        error: childIdsError.message,
+                        status: false
+                    });
+                }
+
+                if (child_id) {
+                    const accessible = childIds.includes(child_id);
+                    if (!accessible) {
+                        return res.status(403).json({ message: 'Forbidden', status: false });
+                    }
+
+                    query = query.eq('child_id', child_id);
+                } else if (childIds.length) {
+                    query = query.in('child_id', childIds);
+                } else {
+                    return res.status(200).json({
+                        message: 'Submissions fetched successfully',
+                        data: [],
+                        status: true
+                    });
+                }
+            } else {
+                return res.status(403).json({ message: 'Forbidden', status: false });
             }
 
             const { data, error } = await query;
@@ -203,14 +276,56 @@ export default class QuestionnaireSubmission {
             if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
 
             const { submission_id } = req.params;
-            const parent_user_id = user.id;
+            const { data: profile, error: roleError } = await getRoleForUser(supabase, user.id);
+            if (roleError || !profile?.role) return res.status(403).json({ message: 'Forbidden', status: false });
 
-            const { data, error } = await supabase
+            const baseQuery = supabase
                 .from('questionnaire_submissions')
                 .select('*, children(child_name), questionnaire_results(*)')
-                .eq('submission_id', submission_id)
-                .eq('parent_user_id', parent_user_id)
-                .single();
+                .eq('submission_id', submission_id);
+
+            let data;
+            let error;
+
+            if (profile.role === 'parent') {
+                ({ data, error } = await baseQuery.eq('parent_user_id', user.id).single());
+            } else if (profile.role === 'expert') {
+                const { data: submission, error: submissionError } = await baseQuery.maybeSingle();
+
+                if (submissionError) {
+                    return res.status(400).json({
+                        message: 'Error fetching submission',
+                        error: submissionError.message,
+                        status: false
+                    });
+                }
+
+                if (!submission) {
+                    return res.status(404).json({
+                        message: 'Submission not found',
+                        status: false
+                    });
+                }
+
+                const { allowed, error: accessError } = await canExpertAccessChild(supabase, user.id, submission.child_id);
+
+                if (accessError) {
+                    return res.status(400).json({
+                        message: 'Error validating submission access',
+                        error: accessError.message,
+                        status: false
+                    });
+                }
+
+                if (!allowed) {
+                    return res.status(403).json({ message: 'Forbidden', status: false });
+                }
+
+                data = submission;
+                error = null;
+            } else {
+                return res.status(403).json({ message: 'Forbidden', status: false });
+            }
 
             if (error) {
                 return res.status(400).json({
