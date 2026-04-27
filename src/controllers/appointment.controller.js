@@ -1,13 +1,11 @@
 import ZoomService from '../utils/zoom-service.js';
-import { expireUnpaidConfirmedAppointments } from '../utils/appointment-payment-expiry.js';
 import {
     notifyAppointmentCancelled,
     notifyAppointmentCompleted,
     notifyAppointmentNoShow,
     notifyExpertNewAppointment,
     notifyParentAppointmentConfirmed,
-    scheduleAppointmentReminders,
-    schedulePaymentReminders
+    scheduleAppointmentReminders
 } from '../services/notification-events.service.js';
 
 async function getAuthContext(supabase) {
@@ -136,13 +134,6 @@ export default class Appointment {
 
             if (auth.role !== 'parent') {
                 return res.status(403).json({ success: false, message: 'Forbidden' });
-            }
-
-            try {
-                await expireUnpaidConfirmedAppointments();
-            } catch (expiryError) {
-                console.error('Failed to expire unpaid confirmed appointments in bookAppointment:', expiryError);
-                return res.status(500).json({ success: false, message: 'Failed to validate appointment availability' });
             }
 
             const { slot_id, child_id, booked_mode } = req.body;
@@ -387,9 +378,6 @@ export default class Appointment {
 
             notifyParentAppointmentConfirmed(data).catch((notifyError) => {
                 console.error('notifyParentAppointmentConfirmed failed:', notifyError?.message || notifyError);
-            });
-            schedulePaymentReminders(data).catch((scheduleError) => {
-                console.error('schedulePaymentReminders failed:', scheduleError?.message || scheduleError);
             });
             scheduleAppointmentReminders(data, [data.parent_id, data.expert_id]).catch((scheduleError) => {
                 console.error('scheduleAppointmentReminders failed:', scheduleError?.message || scheduleError);

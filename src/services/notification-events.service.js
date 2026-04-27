@@ -30,7 +30,7 @@ export async function notifyParentAppointmentConfirmed(appointment) {
         recipientUserId: appointment.parent_id,
         eventType: 'appointment.confirmed',
         title: 'Appointment confirmed',
-        body: 'Your expert confirmed the appointment. Please complete payment within 24 hours.',
+        body: 'Your expert confirmed the appointment. You can proceed with payment.',
         entityType: 'appointment',
         entityId: appointment.appointment_id,
         deepLink: `speechspectrum://appointments/${appointment.appointment_id}`,
@@ -144,33 +144,3 @@ export async function notifyPaymentStatus(appointmentId, eventType, title, body)
     });
 }
 
-export async function schedulePaymentReminders(appointment) {
-    if (!appointment?.parent_id || !appointment?.appointment_id || !appointment?.updated_at) return;
-    const base = new Date(appointment.updated_at).getTime();
-    if (Number.isNaN(base)) return;
-
-    const reminders = [
-        { label: '12h', msAfterConfirm: 12 * 60 * 60 * 1000, body: 'Please complete payment for your confirmed appointment.' },
-        { label: '21h', msAfterConfirm: 21 * 60 * 60 * 1000, body: 'Payment deadline is approaching for your appointment.' },
-        { label: '23h30m', msAfterConfirm: 23.5 * 60 * 60 * 1000, body: 'Final reminder: complete payment to avoid auto-cancellation.' }
-    ];
-
-    for (const reminder of reminders) {
-        const when = new Date(base + reminder.msAfterConfirm);
-        if (when.getTime() <= Date.now()) continue;
-
-        await scheduleNotification({
-            recipientUserId: appointment.parent_id,
-            eventType: 'payment.pending_reminder',
-            title: 'Payment reminder',
-            body: reminder.body,
-            entityType: 'payment',
-            entityId: appointment.appointment_id,
-            deepLink: `speechspectrum://appointments/${appointment.appointment_id}/payment`,
-            webPath: `/appointments/${appointment.appointment_id}/payment`,
-            payload: { reminder_slot: reminder.label },
-            scheduledFor: when.toISOString(),
-            dedupeKey: `payment:${appointment.appointment_id}:${appointment.parent_id}:${reminder.label}`
-        });
-    }
-}

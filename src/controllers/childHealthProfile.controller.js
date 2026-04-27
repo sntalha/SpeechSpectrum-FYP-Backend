@@ -26,6 +26,8 @@ const ALLOWED_DOCUMENT_TYPES = [
     'other'
 ];
 
+const EXPERT_CHILD_ACCESS_STATUSES = ['scheduled', 'confirmed'];
+
 function buildProfilePayload(body = {}) {
     const payload = {};
 
@@ -62,6 +64,19 @@ async function getChildById(supabase, child_id) {
         .maybeSingle();
 
     return { child, error };
+}
+
+async function canExpertAccessChild(supabase, expertId, childId) {
+    const { data, error } = await supabase
+        .from('appointments')
+        .select('appointment_id')
+        .eq('expert_id', expertId)
+        .eq('child_id', childId)
+        .in('status', EXPERT_CHILD_ACCESS_STATUSES)
+        .limit(1)
+        .maybeSingle();
+
+    return { allowed: !!data, error };
 }
 
 export default class ChildHealthProfile {
@@ -183,6 +198,25 @@ export default class ChildHealthProfile {
 
             if (profile.role === 'parent' && child.parent_user_id !== user.id) {
                 return res.status(403).json({ message: 'Forbidden', status: false });
+            }
+
+            if (profile.role === 'expert') {
+                const { allowed, error: accessError } = await canExpertAccessChild(supabase, user.id, child_id);
+
+                if (accessError) {
+                    return res.status(400).json({
+                        message: 'Error validating child access',
+                        error: accessError.message,
+                        status: false
+                    });
+                }
+
+                if (!allowed) {
+                    return res.status(403).json({
+                        message: 'Experts can only access child profiles for scheduled or confirmed appointments',
+                        status: false
+                    });
+                }
             }
 
             const { data, error } = await supabase

@@ -1,4 +1,40 @@
-import Constants from '../constant.js';
+const EXPERT_CHILD_ACCESS_STATUSES = ['scheduled', 'confirmed'];
+
+async function getRoleForUser(supabase, userId) {
+    return supabase
+        .from('profiles')
+        .select('role')
+        .eq('user_id', userId)
+        .maybeSingle();
+}
+
+async function getExpertAccessibleChildIds(supabase, expertId) {
+    const { data, error } = await supabase
+        .from('appointments')
+        .select('child_id')
+        .eq('expert_id', expertId)
+        .in('status', EXPERT_CHILD_ACCESS_STATUSES);
+
+    if (error) {
+        return { childIds: [], error };
+    }
+
+    const childIds = [...new Set((data || []).map((row) => row.child_id).filter(Boolean))];
+    return { childIds, error: null };
+}
+
+async function canExpertAccessChild(supabase, expertId, childId) {
+    const { data, error } = await supabase
+        .from('appointments')
+        .select('appointment_id')
+        .eq('expert_id', expertId)
+        .eq('child_id', childId)
+        .in('status', EXPERT_CHILD_ACCESS_STATUSES)
+        .limit(1)
+        .maybeSingle();
+
+    return { allowed: !!data, error };
+}
 
 export default class Child {
     static async createChild(req, res) {
@@ -65,12 +101,51 @@ export default class Child {
             const { data: { user }, error: userError } = await supabase.auth.getUser();
             if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
 
-            const parent_user_id = user.id;
+            const { data: profile, error: roleError } = await getRoleForUser(supabase, user.id);
+            if (roleError || !profile?.role) {
+                return res.status(403).json({ message: 'Forbidden', status: false });
+            }
 
-            const { data, error } = await supabase
-                .from('children')
-                .select('*')
-                .eq('parent_user_id', parent_user_id);
+            let data = [];
+            let error = null;
+
+            if (profile.role === 'parent') {
+                const result = await supabase
+                    .from('children')
+                    .select('*')
+                    .eq('parent_user_id', user.id);
+
+                data = result.data || [];
+                error = result.error;
+            } else if (profile.role === 'expert') {
+                const { childIds, error: childIdsError } = await getExpertAccessibleChildIds(supabase, user.id);
+
+                if (childIdsError) {
+                    return res.status(400).json({
+                        message: 'Error fetching children',
+                        error: childIdsError.message,
+                        status: false
+                    });
+                }
+
+                if (!childIds.length) {
+                    return res.status(200).json({
+                        message: 'Children fetched successfully',
+                        data: [],
+                        status: true
+                    });
+                }
+
+                const result = await supabase
+                    .from('children')
+                    .select('*')
+                    .in('child_id', childIds);
+
+                data = result.data || [];
+                error = result.error;
+            } else {
+                return res.status(403).json({ message: 'Forbidden', status: false });
+            }
 
             if (error) {
                 return res.status(400).json({
@@ -102,14 +177,42 @@ export default class Child {
             if (userError || !user) return res.status(401).json({ message: 'Unauthorized', status: false });
 
             const { child_id } = req.params;
-            const parent_user_id = user.id;
+            const { data: profile, error: roleError } = await getRoleForUser(supabase, user.id);
+            if (roleError || !profile?.role) {
+                return res.status(403).json({ message: 'Forbidden', status: false });
+            }
 
-            const { data, error } = await supabase
+            if (profile.role === 'expert') {
+                const { allowed, error: accessError } = await canExpertAccessChild(supabase, user.id, child_id);
+
+                if (accessError) {
+                    return res.status(400).json({
+                        message: 'Error validating child access',
+                        error: accessError.message,
+                        status: false
+                    });
+                }
+
+                if (!allowed) {
+                    return res.status(403).json({
+                        message: 'Experts can only access children from scheduled or confirmed appointments',
+                        status: false
+                    });
+                }
+            } else if (profile.role !== 'parent') {
+                return res.status(403).json({ message: 'Forbidden', status: false });
+            }
+
+            let query = supabase
                 .from('children')
                 .select('*')
-                .eq('child_id', child_id)
-                .eq('parent_user_id', parent_user_id)
-                .single();
+                .eq('child_id', child_id);
+
+            if (profile.role === 'parent') {
+                query = query.eq('parent_user_id', user.id);
+            }
+
+            const { data, error } = await query.maybeSingle();
 
             if (error) {
                 return res.status(400).json({

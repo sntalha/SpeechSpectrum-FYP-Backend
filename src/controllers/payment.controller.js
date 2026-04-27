@@ -6,7 +6,6 @@ import safepayClient, {
     CHECKOUT_CANCEL_URL,
     SAFEPAY_WEBHOOK_SECRET
 } from '../config/safepay-config.js';
-import { expireUnpaidConfirmedAppointments as runUnpaidConfirmedAppointmentExpiry } from '../utils/appointment-payment-expiry.js';
 import { notifyPaymentStatus } from '../services/notification-events.service.js';
 
 /*
@@ -60,46 +59,9 @@ function getWebhookSupabaseClient() {
 }
 
 export default class PaymentController {
-    static async expireUnpaidConfirmedAppointments(req, res) {
-        try {
-            const configuredCronSecret = process.env.CRON_SECRET;
-            const authHeader = req.headers.authorization;
-
-            if (configuredCronSecret && authHeader !== `Bearer ${configuredCronSecret}`) {
-                return res.status(401).json({ status: false, message: 'Unauthorized' });
-            }
-
-            const result = await runUnpaidConfirmedAppointmentExpiry();
-
-            return res.status(200).json({
-                status: true,
-                message: 'Expired unpaid confirmed appointments processed',
-                data: result
-            });
-        } catch (error) {
-            console.error('expireUnpaidConfirmedAppointments error:', error);
-            return res.status(500).json({
-                status: false,
-                message: 'Failed to expire unpaid confirmed appointments',
-                error: error.message
-            });
-        }
-    }
-
     static async initiatePayment(req, res) {
         try {
             const supabase = req.supabase;
-
-            try {
-                await runUnpaidConfirmedAppointmentExpiry();
-            } catch (expiryError) {
-                console.error('Failed to expire unpaid confirmed appointments in initiatePayment:', expiryError);
-                return res.status(500).json({
-                    message: 'Failed to validate payment window',
-                    error: expiryError.message,
-                    status: false
-                });
-            }
 
             const {
                 data: { user },
@@ -152,7 +114,7 @@ export default class PaymentController {
 
             const { data: appointment, error: appointmentError } = await supabase
                 .from('appointments')
-                .select('appointment_id, parent_id, status, payment_status, currency, fee_charged')
+                .select('appointment_id, parent_id, currency, fee_charged')
                 .eq('appointment_id', appointment_id)
                 .maybeSingle();
 
@@ -170,20 +132,6 @@ export default class PaymentController {
 
             if (appointment.parent_id !== user.id) {
                 return res.status(403).json({ message: 'Forbidden', status: false });
-            }
-
-            if (appointment.status !== 'confirmed') {
-                return res.status(400).json({
-                    message: 'Only confirmed appointments can be paid',
-                    status: false
-                });
-            }
-
-            if (appointment.payment_status === 'paid') {
-                return res.status(400).json({
-                    message: 'Payment already completed for this appointment',
-                    status: false
-                });
             }
 
             if (String(appointment.currency || '').toUpperCase() !== 'PKR') {
@@ -458,7 +406,7 @@ export default class PaymentController {
                     payment.appointment_id,
                     'payment.failed',
                     'Payment failed',
-                    'Your payment did not complete. Please retry before the deadline.'
+                    'Your payment did not complete. Please retry the payment to proceed.'
                 ).catch((notifyError) => {
                     console.error('notifyPaymentStatus(payment.failed) failed:', notifyError?.message || notifyError);
                 });
@@ -685,7 +633,7 @@ export default class PaymentController {
                         appointmentForFailed.appointment_id,
                         'payment.failed',
                         'Payment failed',
-                        'Your payment did not complete. Please retry before the deadline.'
+                        'Your payment did not complete. Please retry the payment to proceed.'
                     ).catch((notifyError) => {
                         console.error('notifyPaymentStatus(webhook payment.failed) failed:', notifyError?.message || notifyError);
                     });
