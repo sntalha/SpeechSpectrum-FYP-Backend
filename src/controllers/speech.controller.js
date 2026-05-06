@@ -144,7 +144,7 @@ export default class Speech {
                     while (retries > 0) {
                         try {
                             predictionResponse = await axios.post(
-                                'https://server4-speech.vercel.app/predict',
+                                'https://asdspeech-api-l4x5t.ondigitalocean.app/predict',
                                 formData,
                                 {
                                     headers: {
